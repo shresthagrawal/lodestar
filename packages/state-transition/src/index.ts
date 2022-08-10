@@ -1,3 +1,5 @@
+import {getAttestationParticipationStatus} from "./block/processAttestationsAltair.js";
+
 export * from "./stateTransition.js";
 export * from "./constants/index.js";
 export * from "./util/index.js";
@@ -37,3 +39,5 @@ export {assertValidAttesterSlashing} from "./block/processAttesterSlashing.js";
 
 // BeaconChain, to prepare new blocks
 export {becomesNewEth1Data} from "./block/processEth1Data.js";
+
+export {getAttestationParticipationStatus};
