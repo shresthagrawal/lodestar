@@ -1,6 +1,6 @@
 import varint from "varint";
 import {source} from "stream-to-it";
-import snappy from "@chainsafe/snappy-stream";
+import {createCompressStream} from "@chainsafe/snappy-stream-2";
 import {RequestOrOutgoingResponseBody, OutgoingSerializer} from "../../types.js";
 import {SszSnappyError, SszSnappyErrorCode} from "./errors.js";
 
@@ -30,7 +30,7 @@ export async function* encodeSszSnappy(bytes: Buffer): AsyncGenerator<Buffer> {
   // By first computing and writing the SSZ byte length, the SSZ encoder can then directly
   // write the chunk contents to the stream. Snappy writer compresses frame by frame
 
-  const stream = snappy.createCompressStream();
+  const stream = createCompressStream();
   stream.write(bytes);
   stream.end();
   yield* source<Buffer>(stream);

@@ -1,4 +1,4 @@
-declare module "@chainsafe/snappy-stream" {
+declare module "@chainsafe/snappy-stream-2" {
   import {Transform} from "node:stream";
 
   export function createUncompressStream(opts?: {asBuffer?: boolean}): Transform;

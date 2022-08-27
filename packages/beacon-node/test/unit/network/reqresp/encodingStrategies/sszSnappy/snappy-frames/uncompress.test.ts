@@ -1,11 +1,11 @@
 import {expect} from "chai";
 import {Uint8ArrayList} from "uint8arraylist";
-import snappy from "@chainsafe/snappy-stream";
+import {createCompressStream} from "@chainsafe/snappy-stream-2";
 import {SnappyFramesUncompress} from "../../../../../../../src/network/reqresp/encodingStrategies/sszSnappy/snappyFrames/uncompress.js";
 
 describe("snappy frames uncompress", function () {
   it("should work with short input", function (done) {
-    const compressStream = snappy.createCompressStream();
+    const compressStream = createCompressStream();
 
     const decompress = new SnappyFramesUncompress();
 
@@ -23,7 +23,7 @@ describe("snappy frames uncompress", function () {
   });
 
   it("should work with huge input", function (done) {
-    const compressStream = snappy.createCompressStream();
+    const compressStream = createCompressStream();
 
     const decompress = new SnappyFramesUncompress();
 
