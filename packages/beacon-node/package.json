@@ -150,10 +150,12 @@
     "stream-to-it": "^0.2.0",
     "strict-event-emitter-types": "^2.0.0",
     "uint8arraylist": "^2.3.2",
+    "wtfnode": "^0.8.4",
     "varint": "^6.0.0"
   },
   "devDependencies": {
     "@types/bl": "^5.0.1",
+    "@types/wtfnode": "^0.7.0",
     "@types/eventsource": "^1.1.5",
     "@types/it-all": "^1.0.0",
     "@types/jwt-simple": "0.5.33",

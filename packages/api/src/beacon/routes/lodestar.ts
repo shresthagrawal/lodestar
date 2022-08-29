@@ -58,6 +58,7 @@ export type LodestarNodePeer = NodePeer & {
 };
 
 export type Api = {
+  getWtfNode(): Promise<{data: string}>;
   /** Trigger to write a heapdump to disk at `dirpath`. May take > 1min */
   writeHeapdump(dirpath?: string): Promise<{data: {filepath: string}}>;
   /** TODO: description */
@@ -105,6 +106,7 @@ export type Api = {
  * Define javascript values for each route
  */
 export const routesData: RoutesData<Api> = {
+  getWtfNode: {url: "/eth/v1/lodestar/wtfnode", method: "GET"},
   writeHeapdump: {url: "/eth/v1/lodestar/writeheapdump", method: "POST"},
   getLatestWeakSubjectivityCheckpointEpoch: {url: "/eth/v1/lodestar/ws_epoch", method: "GET"},
   getSyncChainsDebugState: {url: "/eth/v1/lodestar/sync-chains-debug-state", method: "GET"},
@@ -125,6 +127,7 @@ export const routesData: RoutesData<Api> = {
 };
 
 export type ReqTypes = {
+  getWtfNode: ReqEmpty;
   writeHeapdump: {query: {dirpath?: string}};
   getLatestWeakSubjectivityCheckpointEpoch: ReqEmpty;
   getSyncChainsDebugState: ReqEmpty;
@@ -146,6 +149,7 @@ export type ReqTypes = {
 
 export function getReqSerializers(): ReqSerializers<Api, ReqTypes> {
   return {
+    getWtfNode: reqEmpty,
     writeHeapdump: {
       writeReq: (dirpath) => ({query: {dirpath}}),
       parseReq: ({query}) => [query.dirpath],
@@ -193,6 +197,7 @@ export function getReqSerializers(): ReqSerializers<Api, ReqTypes> {
 /* eslint-disable @typescript-eslint/naming-convention */
 export function getReturnTypes(): ReturnTypes<Api> {
   return {
+    getWtfNode: sameType(),
     writeHeapdump: sameType(),
     getLatestWeakSubjectivityCheckpointEpoch: sameType(),
     getSyncChainsDebugState: jsonType("snake"),
