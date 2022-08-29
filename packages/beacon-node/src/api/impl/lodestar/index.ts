@@ -32,7 +32,7 @@ export function getLodestarApi({
      */
      async getWtfNode() {
       // Browser interop
-      if (typeof require !== "function") throw Error("NodeJS only");
+      // if (typeof require !== "function") throw Error("NodeJS only");
 
       // eslint-disable-next-line
       // const wtfnode = require("wtfnode");
