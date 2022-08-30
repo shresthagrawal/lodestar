@@ -2258,10 +2258,9 @@
     uint8arraylist "^2.0.0"
     uint8arrays "^3.0.0"
 
-"@libp2p/tcp@^3.0.3":
+"@libp2p/tcp@https://github.com/tuyennhv/js-libp2p-tcp.git#tuyen/end-socket-build":
   version "3.0.3"
-  resolved "https://registry.yarnpkg.com/@libp2p/tcp/-/tcp-3.0.3.tgz#259fdb3577a86ff8ec223e9e1f42417ee8708fd2"
-  integrity sha512-XllEq2HiS3NokXm93esNyd9R6pcX0gD8CQUli7APDX1ZGZYcPosnLWxwFVruXQsAvfRNlvCMNMPDnIOtPZDDuA==
+  resolved "https://github.com/tuyennhv/js-libp2p-tcp.git#d422a38b8ac2a550008f1ca2af4fd6dfc5c92c92"
   dependencies:
     "@libp2p/interface-connection" "^3.0.1"
     "@libp2p/interface-transport" "^1.0.0"
