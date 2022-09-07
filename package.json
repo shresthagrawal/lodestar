@@ -90,6 +90,7 @@
   },
   "dependencies": {},
   "resolutions": {
-    "libnpmpublish": "4.0.0"
+    "libnpmpublish": "4.0.0",
+    "uint8arraylist": "https://github.com/tuyennhv/uint8arraylist.git#tuyen/Buffer"
   }
 }

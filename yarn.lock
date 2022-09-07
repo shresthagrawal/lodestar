@@ -13175,10 +13175,9 @@ uint8-varint@^1.0.1, uint8-varint@^1.0.2:
     longbits "^1.1.0"
     uint8arraylist "^2.0.0"
 
-uint8arraylist@^2.0.0, uint8arraylist@^2.1.0, uint8arraylist@^2.1.1, uint8arraylist@^2.3.1, uint8arraylist@^2.3.2:
+uint8arraylist@^2.0.0, uint8arraylist@^2.1.0, uint8arraylist@^2.1.1, uint8arraylist@^2.3.1, uint8arraylist@^2.3.2, "uint8arraylist@https://github.com/tuyennhv/uint8arraylist.git#tuyen/Buffer":
   version "2.3.2"
-  resolved "https://registry.yarnpkg.com/uint8arraylist/-/uint8arraylist-2.3.2.tgz#d301f6cb570828b456ef09655c0a4d3b0929ef06"
-  integrity sha512-4ybc/jixmtGhUrebJ0bzB95TjEbskWxBKBRrAozw7P6WcAcZdPMYSLdDuNoEEGo/Cwe+0TNic9CXzWUWzy1quw==
+  resolved "https://github.com/tuyennhv/uint8arraylist.git#e5661e10676e0e680ab15742a8a73239dbef8402"
   dependencies:
     uint8arrays "^3.1.0"
 
