@@ -170,7 +170,7 @@ function getProposerConfigFromArgs(
     // from persistedBackend
     if (args.proposerSettingsFile) {
       throw new YargsError(
-        "Cannot accept --proposerSettingsFile since some proposer configs seemed to have been previously persisted via Keymanager api. Use --flushKeymanagerProposerConfigs in conjuction with --proposerSettingsFile if you want to discard them and instead use proposerSettingsFile"
+        "Cannot accept --proposerSettingsFile since it conflicts with proposer configs previously persisted via the keymanager api. Use --flushKeymanagerProposerConfigs in conjuction with --proposerSettingsFile to discard them and instead use the proposerSettingsFile"
       );
     }
     valProposerConfig = {proposerConfig: proposerConfigFromKeymanager, defaultConfig};
