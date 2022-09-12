@@ -29,7 +29,7 @@ import {computeSyncPeriodAtEpoch, computeSyncPeriodAtSlot, computeEpochAtSlot} f
 export {LightclientEvent} from "./events.js";
 export {SyncCommitteeFast} from "./types.js";
 
-export { assertValidLightClientUpdate } from './validation';
+export { assertValidLightClientUpdate } from './validation.js';
 
 export type LightclientInitArgs = {
   config: IChainForkConfig;

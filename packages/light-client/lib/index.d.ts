@@ -10,7 +10,7 @@ import { GenesisData } from "./networks.js";
 import { ILcLogger } from "./utils/logger.js";
 export { LightclientEvent } from "./events.js";
 export { SyncCommitteeFast } from "./types.js";
-export { assertValidLightClientUpdate } from './validation';
+export { assertValidLightClientUpdate } from './validation.js';
 export declare type LightclientInitArgs = {
     config: IChainForkConfig;
     logger?: ILcLogger;

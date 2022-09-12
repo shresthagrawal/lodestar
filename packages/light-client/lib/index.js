@@ -18,7 +18,7 @@ import { getLcLoggerConsole } from "./utils/logger.js";
 import { computeSyncPeriodAtEpoch, computeSyncPeriodAtSlot, computeEpochAtSlot } from "./utils/clock.js";
 // Re-export types
 export { LightclientEvent } from "./events.js";
-export { assertValidLightClientUpdate } from './validation';
+export { assertValidLightClientUpdate } from './validation.js';
 /** Provides some protection against a server client sending header updates too far away in the future */
 const MAX_CLOCK_DISPARITY_SEC = 12;
 /** Prevent responses that are too big and get truncated. No specific reasoning for 32 */
