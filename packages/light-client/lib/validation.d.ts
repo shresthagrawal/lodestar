@@ -7,7 +7,7 @@ import { SyncCommitteeFast } from "./types.js";
  * @param syncCommittee SyncPeriod that signed this update: `computeSyncPeriodAtSlot(update.header.slot) - 1`
  * @param forkVersion ForkVersion that was used to sign the update
  */
-export declare function assertValidLightClientUpdate(config: IBeaconConfig, syncCommittee: SyncCommitteeFast, update: altair.LightClientUpdate): void;
+export declare function assertValidLightClientUpdate(config: IBeaconConfig, syncCommittee: SyncCommitteeFast, update: altair.LightClientUpdate): Promise<void>;
 /**
  * Proof that the state referenced in `update.finalityHeader.stateRoot` includes
  * ```ts
@@ -54,5 +54,5 @@ export declare function activeHeader(update: altair.LightClientUpdate): phase0.B
  * @param forkVersion ForkVersion that was used to sign the update
  * @param signedHeaderRoot Takes header root instead of the head itself to prevent re-hashing on SSE
  */
-export declare function assertValidSignedHeader(config: IBeaconConfig, syncCommittee: SyncCommitteeFast, syncAggregate: altair.SyncAggregate, signedHeaderRoot: Root, signedHeaderSlot: Slot): void;
+export declare function assertValidSignedHeader(config: IBeaconConfig, syncCommittee: SyncCommitteeFast, syncAggregate: altair.SyncAggregate, signedHeaderRoot: Root, signedHeaderSlot: Slot): Promise<void>;
 //# sourceMappingURL=validation.d.ts.map

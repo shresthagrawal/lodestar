@@ -21,11 +21,11 @@ import {computeSyncPeriodAtSlot} from "./utils/clock.js";
  * @param syncCommittee SyncPeriod that signed this update: `computeSyncPeriodAtSlot(update.header.slot) - 1`
  * @param forkVersion ForkVersion that was used to sign the update
  */
-export function assertValidLightClientUpdate(
+export async function assertValidLightClientUpdate(
   config: IBeaconConfig,
   syncCommittee: SyncCommitteeFast,
   update: altair.LightClientUpdate
-): void {
+): Promise<void> {
   // DIFF FROM SPEC: An update with the same header.slot can be valid and valuable to the lightclient
   // It may have more consensus and result in a better snapshot whilst not advancing the state
   // ----
@@ -49,7 +49,7 @@ export function assertValidLightClientUpdate(
 
   const {attestedHeader} = update;
   const headerBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(attestedHeader);
-  assertValidSignedHeader(config, syncCommittee, update.syncAggregate, headerBlockRoot, attestedHeader.slot);
+  await assertValidSignedHeader(config, syncCommittee, update.syncAggregate, headerBlockRoot, attestedHeader.slot);
 }
 
 /**
@@ -137,13 +137,13 @@ export function activeHeader(update: altair.LightClientUpdate): phase0.BeaconBlo
  * @param forkVersion ForkVersion that was used to sign the update
  * @param signedHeaderRoot Takes header root instead of the head itself to prevent re-hashing on SSE
  */
-export function assertValidSignedHeader(
+export async function assertValidSignedHeader(
   config: IBeaconConfig,
   syncCommittee: SyncCommitteeFast,
   syncAggregate: altair.SyncAggregate,
   signedHeaderRoot: Root,
   signedHeaderSlot: Slot
-): void {
+): Promise<void> {
   const participantPubkeys = getParticipantPubkeys(syncCommittee.pubkeys, syncAggregate.syncCommitteeBits);
 
   // Verify sync committee has sufficient participants.
@@ -157,7 +157,7 @@ export function assertValidSignedHeader(
     domain: config.getDomain(signedHeaderSlot, DOMAIN_SYNC_COMMITTEE),
   });
 
-  if (!isValidBlsAggregate(participantPubkeys, signingRoot, syncAggregate.syncCommitteeSignature)) {
+  if (!(await isValidBlsAggregate(participantPubkeys, signingRoot, syncAggregate.syncCommitteeSignature))) {
     throw Error("Invalid aggregate signature");
   }
 }
@@ -165,7 +165,7 @@ export function assertValidSignedHeader(
 /**
  * Same as BLS.verifyAggregate but with detailed error messages
  */
-function isValidBlsAggregate(publicKeys: PublicKey[], message: Uint8Array, signature: Uint8Array): boolean {
+async function isValidBlsAggregate(publicKeys: PublicKey[], message: Uint8Array, signature: Uint8Array): Promise<boolean> {
   let aggPubkey: PublicKey;
   try {
     aggPubkey = bls.PublicKey.aggregate(publicKeys);
@@ -183,7 +183,7 @@ function isValidBlsAggregate(publicKeys: PublicKey[], message: Uint8Array, signa
   }
 
   try {
-    return sig.verify(aggPubkey, message);
+    return await sig.verify(aggPubkey, message);
   } catch (e) {
     (e as Error).message = `Error verifying signature: ${(e as Error).message}`;
     throw e;
