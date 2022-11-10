@@ -1,11 +1,11 @@
-import { altair, phase0, Root, Slot } from "@lodestar/types";
+import { altair, Root, Slot } from "@lodestar/types";
 import { IBeaconConfig } from "@lodestar/config";
-import { routes } from "@lodestar/api";
 import { SyncCommitteeFast } from "./types.js";
 /**
  *
- * @param syncCommittee SyncPeriod that signed this update: `computeSyncPeriodAtSlot(update.header.slot) - 1`
- * @param forkVersion ForkVersion that was used to sign the update
+ * @param config the beacon node config
+ * @param syncCommittee the sync committee update
+ * @param update the light client update for validation
  */
 export declare function assertValidLightClientUpdate(config: IBeaconConfig, syncCommittee: SyncCommitteeFast, update: altair.LightClientUpdate): Promise<void>;
 /**
@@ -20,7 +20,7 @@ export declare function assertValidLightClientUpdate(config: IBeaconConfig, sync
  *
  * Where `hashTreeRoot(state) == update.finalityHeader.stateRoot`
  */
-export declare function assertValidFinalityProof(update: routes.lightclient.LightclientFinalizedUpdate): void;
+export declare function assertValidFinalityProof(update: altair.LightClientFinalityUpdate): void;
 /**
  * Proof that the state referenced in `update.header.stateRoot` includes
  * ```ts
@@ -32,13 +32,6 @@ export declare function assertValidFinalityProof(update: routes.lightclient.Ligh
  * Where `hashTreeRoot(state) == update.header.stateRoot`
  */
 export declare function assertValidSyncCommitteeProof(update: altair.LightClientUpdate): void;
-/**
- * The "active header" is the header that the update is trying to convince us
- * to accept. If a finalized header is present, it's the finalized header,
- * otherwise it's the attested header
- * @param update
- */
-export declare function activeHeader(update: altair.LightClientUpdate): phase0.BeaconBlockHeader;
 /**
  * Assert valid signature for `signedHeader` with provided `syncCommittee`.
  *

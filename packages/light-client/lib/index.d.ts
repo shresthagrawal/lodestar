@@ -6,17 +6,17 @@ import { JsonPath } from "@chainsafe/ssz";
 import { LightclientUpdateStats } from "./utils/update.js";
 import { SyncCommitteeFast } from "./types.js";
 import { LightclientEmitter } from "./events.js";
-import { GenesisData } from "./networks.js";
 import { ILcLogger } from "./utils/logger.js";
 export { LightclientEvent } from "./events.js";
 export { SyncCommitteeFast } from "./types.js";
+export declare type GenesisData = {
+    genesisTime: number;
+    genesisValidatorsRoot: RootHex | Uint8Array;
+};
 export declare type LightclientInitArgs = {
     config: IChainForkConfig;
     logger?: ILcLogger;
-    genesisData: {
-        genesisTime: number;
-        genesisValidatorsRoot: RootHex | Uint8Array;
-    };
+    genesisData: GenesisData;
     beaconApiUrl: string;
     snapshot: {
         header: phase0.BeaconBlockHeader;
@@ -117,7 +117,7 @@ export declare class Lightclient {
      *  period 0         period 1         period 2
      * -|----------------|----------------|----------------|-> time
      *                   | now
-     *                     - active current_sync_committee: period 0
+     *                     - current_sync_committee: period 0
      *                     - known next_sync_committee, signed by current_sync_committee
      */
     private processSyncCommitteeUpdate;

@@ -13,7 +13,7 @@ import { pruneSetToMax } from "./utils/map.js";
 import { isValidMerkleBranch } from "./utils/verifyMerkleBranch.js";
 import { chunkifyInclusiveRange } from "./utils/chunkify.js";
 import { LightclientEvent } from "./events.js";
-import { assertValidSignedHeader, assertValidLightClientUpdate, activeHeader, assertValidFinalityProof, } from "./validation.js";
+import { assertValidSignedHeader, assertValidLightClientUpdate, assertValidFinalityProof } from "./validation.js";
 import { getLcLoggerConsole } from "./utils/logger.js";
 import { computeSyncPeriodAtEpoch, computeSyncPeriodAtSlot, computeEpochAtSlot } from "./utils/clock.js";
 // Re-export types
@@ -96,11 +96,14 @@ export class Lightclient {
         this.onSSE = (event) => {
             try {
                 switch (event.type) {
-                    case routes.events.EventType.lightclientOptimisticUpdate:
+                    case routes.events.EventType.lightClientOptimisticUpdate:
                         this.processOptimisticUpdate(event.message);
                         break;
-                    case routes.events.EventType.lightclientFinalizedUpdate:
+                    case routes.events.EventType.lightClientFinalityUpdate:
                         this.processFinalizedUpdate(event.message);
+                        break;
+                    case routes.events.EventType.lightClientUpdate:
+                        this.processSyncCommitteeUpdate(event.message);
                         break;
                     default:
                         throw Error(`Unknown event ${event.type}`);
@@ -252,8 +255,7 @@ export class Lightclient {
                 this.logger.debug("Started tracking the head");
                 // Subscribe to head updates over SSE
                 // TODO: Use polling for getLatestHeadUpdate() is SSE is unavailable
-                this.api.events.eventstream([routes.events.EventType.lightclientOptimisticUpdate], controller.signal, this.onSSE);
-                this.api.events.eventstream([routes.events.EventType.lightclientFinalizedUpdate], controller.signal, this.onSSE);
+                this.api.events.eventstream([routes.events.EventType.lightClientOptimisticUpdate, routes.events.EventType.lightClientFinalityUpdate], controller.signal, this.onSSE);
             }
             // When close to the end of a sync period poll for sync committee updates
             // Limit lookahead in case EPOCHS_PER_SYNC_COMMITTEE_PERIOD is configured to be very short
@@ -292,20 +294,20 @@ export class Lightclient {
      */
     processOptimisticUpdate(headerUpdate) {
         var _a, _b;
-        const { attestedHeader: header, syncAggregate } = headerUpdate;
+        const { attestedHeader, syncAggregate } = headerUpdate;
         // Prevent registering updates for slots to far ahead
-        if (header.slot > slotWithFutureTolerance(this.config, this.genesisTime, MAX_CLOCK_DISPARITY_SEC)) {
-            throw Error(`header.slot ${header.slot} is too far in the future, currentSlot: ${this.currentSlot}`);
+        if (attestedHeader.slot > slotWithFutureTolerance(this.config, this.genesisTime, MAX_CLOCK_DISPARITY_SEC)) {
+            throw Error(`header.slot ${attestedHeader.slot} is too far in the future, currentSlot: ${this.currentSlot}`);
         }
-        const period = computeSyncPeriodAtSlot(header.slot);
+        const period = computeSyncPeriodAtSlot(attestedHeader.slot);
         const syncCommittee = this.syncCommitteeByPeriod.get(period);
         if (!syncCommittee) {
             // TODO: Attempt to fetch committee update for period if it's before the current clock period
             throw Error(`No syncCommittee for period ${period}`);
         }
-        const headerBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(header);
+        const headerBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(attestedHeader);
         const headerBlockRootHex = toHexString(headerBlockRoot);
-        assertValidSignedHeader(this.config, syncCommittee, syncAggregate, headerBlockRoot, header.slot);
+        assertValidSignedHeader(this.config, syncCommittee, syncAggregate, headerBlockRoot, attestedHeader.slot);
         // Valid header, check if has enough bits.
         // Only accept headers that have at least half of the max participation seen in this period
         // From spec https://github.com/ethereum/consensus-specs/pull/2746/files#diff-5e27a813772fdd4ded9b04dec7d7467747c469552cd422d57c1c91ea69453b7dR122
@@ -327,30 +329,30 @@ export class Lightclient {
         // Maybe update the head
         if (
         // Advance head
-        header.slot > this.head.header.slot ||
+        attestedHeader.slot > this.head.header.slot ||
             // Replace same slot head
-            (header.slot === this.head.header.slot && participation > this.head.participation)) {
+            (attestedHeader.slot === this.head.header.slot && participation > this.head.participation)) {
             // TODO: Do metrics for each case (advance vs replace same slot)
             const prevHead = this.head;
-            this.head = { header, participation, blockRoot: headerBlockRootHex };
+            this.head = { header: attestedHeader, participation, blockRoot: headerBlockRootHex };
             // This is not an error, but a problematic network condition worth knowing about
-            if (header.slot === prevHead.header.slot && prevHead.blockRoot !== headerBlockRootHex) {
+            if (attestedHeader.slot === prevHead.header.slot && prevHead.blockRoot !== headerBlockRootHex) {
                 this.logger.warn("Head update on same slot", {
                     prevHeadSlot: prevHead.header.slot,
                     prevHeadRoot: prevHead.blockRoot,
                 });
             }
             this.logger.info("Head updated", {
-                slot: header.slot,
+                slot: attestedHeader.slot,
                 root: headerBlockRootHex,
             });
             // Emit to consumers
-            this.emitter.emit(LightclientEvent.head, header);
+            this.emitter.emit(LightclientEvent.head, attestedHeader);
         }
         else {
             this.logger.debug("Received valid head update did not update head", {
                 currentHead: `${this.head.header.slot} ${this.head.blockRoot}`,
-                eventHead: `${header.slot} ${headerBlockRootHex}`,
+                eventHead: `${attestedHeader.slot} ${headerBlockRootHex}`,
             });
         }
     }
@@ -406,12 +408,12 @@ export class Lightclient {
      *  period 0         period 1         period 2
      * -|----------------|----------------|----------------|-> time
      *                   | now
-     *                     - active current_sync_committee: period 0
+     *                     - current_sync_committee: period 0
      *                     - known next_sync_committee, signed by current_sync_committee
      */
     processSyncCommitteeUpdate(update) {
         // Prevent registering updates for slots too far in the future
-        const updateSlot = activeHeader(update).slot;
+        const updateSlot = update.attestedHeader.slot;
         if (updateSlot > slotWithFutureTolerance(this.config, this.genesisTime, MAX_CLOCK_DISPARITY_SEC)) {
             throw Error(`updateSlot ${updateSlot} is too far in the future, currentSlot ${this.currentSlot}`);
         }

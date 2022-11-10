@@ -25,9 +25,6 @@
     },
     "./networks": {
       "import": "./lib/networks.js"
-    },
-    "./validation": {
-      "import": "./lib/validation.js"
     }
   },
   "types": "./lib/index.d.ts",

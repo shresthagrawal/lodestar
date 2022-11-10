@@ -6,8 +6,9 @@ import { assertZeroHashes, getParticipantPubkeys, isEmptyHeader } from "./utils/
 import { computeSyncPeriodAtSlot } from "./utils/clock.js";
 /**
  *
- * @param syncCommittee SyncPeriod that signed this update: `computeSyncPeriodAtSlot(update.header.slot) - 1`
- * @param forkVersion ForkVersion that was used to sign the update
+ * @param config the beacon node config
+ * @param syncCommittee the sync committee update
+ * @param update the light client update for validation
  */
 export async function assertValidLightClientUpdate(config, syncCommittee, update) {
     // DIFF FROM SPEC: An update with the same header.slot can be valid and valuable to the lightclient
@@ -66,21 +67,9 @@ export function assertValidFinalityProof(update) {
  * Where `hashTreeRoot(state) == update.header.stateRoot`
  */
 export function assertValidSyncCommitteeProof(update) {
-    if (!isValidMerkleBranch(ssz.altair.SyncCommittee.hashTreeRoot(update.nextSyncCommittee), update.nextSyncCommitteeBranch, NEXT_SYNC_COMMITTEE_DEPTH, NEXT_SYNC_COMMITTEE_INDEX, activeHeader(update).stateRoot)) {
+    if (!isValidMerkleBranch(ssz.altair.SyncCommittee.hashTreeRoot(update.nextSyncCommittee), update.nextSyncCommitteeBranch, NEXT_SYNC_COMMITTEE_DEPTH, NEXT_SYNC_COMMITTEE_INDEX, update.attestedHeader.stateRoot)) {
         throw Error("Invalid next sync committee merkle branch");
     }
-}
-/**
- * The "active header" is the header that the update is trying to convince us
- * to accept. If a finalized header is present, it's the finalized header,
- * otherwise it's the attested header
- * @param update
- */
-export function activeHeader(update) {
-    if (!isEmptyHeader(update.finalizedHeader)) {
-        return update.finalizedHeader;
-    }
-    return update.attestedHeader;
 }
 /**
  * Assert valid signature for `signedHeader` with provided `syncCommittee`.
