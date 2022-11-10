@@ -1,6 +1,6 @@
 import {EventEmitter} from "events";
 import StrictEventEmitter from "strict-event-emitter-types";
-import PeerId from "peer-id";
+import {PeerId} from "@libp2p/interface-peer-id";
 import {computeStartSlotAtEpoch} from "@lodestar/state-transition";
 import {IBeaconConfig} from "@lodestar/config";
 import {Epoch, phase0} from "@lodestar/types";
@@ -114,7 +114,7 @@ export class RangeSync extends (EventEmitter as {new (): RangeSyncEmitter}) {
     // Compute if we should do a Finalized or Head sync with this peer
     const {syncType, startEpoch, target} = getRangeSyncTarget(localStatus, peerStatus, this.chain.forkChoice);
     this.logger.debug("Sync peer joined", {
-      peer: peerId.toB58String(),
+      peer: peerId.toString(),
       syncType,
       startEpoch,
       targetSlot: target.slot,
@@ -297,24 +297,19 @@ export class RangeSync extends (EventEmitter as {new (): RangeSyncEmitter}) {
   }
 
   private scrapeMetrics(metrics: IMetrics): void {
+    metrics.syncRange.syncChainsPeers.reset();
     const syncChainsByType: Record<RangeSyncType, number> = {
       [RangeSyncType.Finalized]: 0,
       [RangeSyncType.Head]: 0,
     };
 
-    const peersByTypeArr: Record<RangeSyncType, number[]> = {
-      [RangeSyncType.Finalized]: [],
-      [RangeSyncType.Head]: [],
-    };
-
     for (const chain of this.chains.values()) {
-      peersByTypeArr[chain.syncType].push(chain.peers);
+      metrics.syncRange.syncChainsPeers.observe({syncType: chain.syncType}, chain.peers);
       syncChainsByType[chain.syncType]++;
     }
 
     for (const syncType of rangeSyncTypes) {
       metrics.syncRange.syncChains.set({syncType}, syncChainsByType[syncType]);
-      metrics.syncRange.syncChainsPeers.set({syncType}, peersByTypeArr[syncType]);
     }
   }
 }

@@ -1,14 +1,11 @@
 name: Browser tests
 
-on:
+on: 
   push:
-    branches:
-      - stable
-      - unstable
+    # We intentionally don't run push on feature branches. See PR for rational. 
+    branches: [unstable, stable]
   pull_request:
-    branches:
-      - stable
-      - unstable
+  workflow_dispatch:
 
 jobs:
   tests-main:

@@ -7,6 +7,14 @@ import {PresetName} from "@lodestar/params";
  */
 export type IChainConfig = {
   PRESET_BASE: PresetName;
+  /**
+   * Free-form short name of the network that this configuration applies to - known
+   * canonical network names include:
+   * * 'mainnet' - there can be only one
+   * * 'prater' - testnet
+   * Must match the regex: [a-z0-9\-]
+   */
+  CONFIG_NAME: string;
 
   // Transition
   TERMINAL_TOTAL_DIFFICULTY: bigint;
@@ -26,9 +34,9 @@ export type IChainConfig = {
   // Bellatrix
   BELLATRIX_FORK_VERSION: Uint8Array;
   BELLATRIX_FORK_EPOCH: number;
-  // Sharding
-  SHARDING_FORK_VERSION: Uint8Array;
-  SHARDING_FORK_EPOCH: number;
+  // Capella
+  CAPELLA_FORK_VERSION: Uint8Array;
+  CAPELLA_FORK_EPOCH: number;
 
   // Time parameters
   SECONDS_PER_SLOT: number;
@@ -55,6 +63,7 @@ export type IChainConfig = {
 
 export const chainConfigTypes: SpecTypes<IChainConfig> = {
   PRESET_BASE: "string",
+  CONFIG_NAME: "string",
 
   // Transition
   TERMINAL_TOTAL_DIFFICULTY: "bigint",
@@ -74,9 +83,9 @@ export const chainConfigTypes: SpecTypes<IChainConfig> = {
   // Bellatrix
   BELLATRIX_FORK_VERSION: "bytes",
   BELLATRIX_FORK_EPOCH: "number",
-  // Sharding
-  SHARDING_FORK_VERSION: "bytes",
-  SHARDING_FORK_EPOCH: "number",
+  // Capella
+  CAPELLA_FORK_VERSION: "bytes",
+  CAPELLA_FORK_EPOCH: "number",
 
   // Time parameters
   SECONDS_PER_SLOT: "number",

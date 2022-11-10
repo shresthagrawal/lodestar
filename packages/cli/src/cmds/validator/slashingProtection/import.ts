@@ -1,11 +1,11 @@
 import fs from "node:fs";
+import path from "node:path";
 import {Interchange} from "@lodestar/validator";
 import {ICliCommand} from "../../../util/index.js";
 import {IGlobalArgs} from "../../../options/index.js";
 import {AccountValidatorArgs} from "../options.js";
 import {getCliLogger, ILogArgs} from "../../../util/index.js";
 import {getBeaconConfigFromArgs} from "../../../config/index.js";
-import {getBeaconPaths} from "../../beacon/paths.js";
 import {getValidatorPaths} from "../paths.js";
 import {getGenesisValidatorsRoot, getSlashingProtection} from "./utils.js";
 import {ISlashingProtectionArgs} from "./options.js";
@@ -40,20 +40,28 @@ export const importCmd: ICliCommand<
   },
 
   handler: async (args) => {
-    const beaconPaths = getBeaconPaths(args);
-    const config = getBeaconConfigFromArgs(args);
-    const logger = getCliLogger(args, beaconPaths, config);
+    const {config, network} = getBeaconConfigFromArgs(args);
+    const validatorPaths = getValidatorPaths(args, network);
+    // slashingProtection commands are fast so do not require logFile feature
+    const logger = getCliLogger(args, {defaultLogFilepath: path.join(validatorPaths.dataDir, "validator.log")}, config);
 
-    const {validatorsDbDir: dbPath} = getValidatorPaths(args);
+    const {validatorsDbDir: dbPath} = getValidatorPaths(args, network);
 
     logger.info("Importing the slashing protection logs", {dbPath});
-    const genesisValidatorsRoot = await getGenesisValidatorsRoot(args);
-    const slashingProtection = getSlashingProtection(args);
+
+    const {slashingProtection, metadata} = getSlashingProtection(args, network);
+
+    // Fetch genesisValidatorsRoot from:
+    // - existing cached in validator DB
+    // - known genesis data from existing network
+    // - else fetch from beacon node
+    const genesisValidatorsRoot = (await metadata.getGenesisValidatorsRoot()) ?? (await getGenesisValidatorsRoot(args));
 
     logger.verbose("Reading the slashing protection logs", {file: args.file});
-    const importFile = await fs.promises.readFile(args.file, "utf8");
-    const importFileJson = JSON.parse(importFile) as Interchange;
-    await slashingProtection.importInterchange(importFileJson, genesisValidatorsRoot, logger);
+    const interchangeStr = await fs.promises.readFile(args.file, "utf8");
+    const interchangeJson = JSON.parse(interchangeStr) as Interchange;
+
+    await slashingProtection.importInterchange(interchangeJson, genesisValidatorsRoot, logger);
     logger.info("Import completed successfully");
   },
 };

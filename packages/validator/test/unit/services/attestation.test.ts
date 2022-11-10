@@ -14,10 +14,10 @@ import {loggerVc} from "../../utils/logger.js";
 import {ClockMock} from "../../utils/clock.js";
 import {ChainHeaderTracker} from "../../../src/services/chainHeaderTracker.js";
 import {ValidatorEventEmitter} from "../../../src/services/emitter.js";
+import {ZERO_HASH, ZERO_HASH_HEX} from "../../utils/types.js";
 
 describe("AttestationService", function () {
   const sandbox = sinon.createSandbox();
-  const ZERO_HASH = Buffer.alloc(32, 0);
 
   const api = getApiClientStub(sandbox);
   const validatorStore = sinon.createStubInstance(ValidatorStore) as ValidatorStore &
@@ -71,8 +71,8 @@ describe("AttestationService", function () {
     ];
 
     // Return empty replies to duties service
-    api.beacon.getStateValidators.resolves({data: []});
-    api.validator.getAttesterDuties.resolves({dependentRoot: ZERO_HASH, data: []});
+    api.beacon.getStateValidators.resolves({executionOptimistic: false, data: []});
+    api.validator.getAttesterDuties.resolves({dependentRoot: ZERO_HASH_HEX, executionOptimistic: false, data: []});
 
     // Mock duties service to return some duties directly
     attestationService["dutiesService"].getDutiesAtSlot = sinon.stub().returns(duties);

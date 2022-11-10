@@ -12,13 +12,12 @@ import {
 import {
   CachedBeaconStateAllForks,
   getEffectiveBalanceIncrementsZeroInactive,
-  isBellatrixStateType,
+  isExecutionStateType,
   isMergeTransitionComplete,
 } from "@lodestar/state-transition";
 
 import {computeAnchorCheckpoint} from "../initState.js";
 import {ChainEventEmitter} from "../emitter.js";
-import {IMetrics} from "../../metrics/index.js";
 import {ChainEvent} from "../emitter.js";
 import {GENESIS_SLOT} from "../../constants/index.js";
 
@@ -33,8 +32,7 @@ export function initializeForkChoice(
   currentSlot: Slot,
   state: CachedBeaconStateAllForks,
   opts: ForkChoiceOpts,
-  justifiedBalancesGetter: JustifiedBalancesGetter,
-  metrics?: IMetrics | null
+  justifiedBalancesGetter: JustifiedBalancesGetter
 ): ForkChoice {
   const {blockHeader, checkpoint} = computeAnchorCheckpoint(config, state);
   const finalizedCheckpoint = {...checkpoint};
@@ -80,7 +78,7 @@ export function initializeForkChoice(
         unrealizedFinalizedEpoch: finalizedCheckpoint.epoch,
         unrealizedFinalizedRoot: toHexString(finalizedCheckpoint.root),
 
-        ...(isBellatrixStateType(state) && isMergeTransitionComplete(state)
+        ...(isExecutionStateType(state) && isMergeTransitionComplete(state)
           ? {
               executionPayloadBlockHash: toHexString(state.latestExecutionPayloadHeader.blockHash),
               executionStatus: blockHeader.slot === GENESIS_SLOT ? ExecutionStatus.Valid : ExecutionStatus.Syncing,
@@ -90,7 +88,6 @@ export function initializeForkChoice(
       currentSlot
     ),
 
-    opts,
-    metrics
+    opts
   );
 }

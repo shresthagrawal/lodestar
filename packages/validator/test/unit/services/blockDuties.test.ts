@@ -3,20 +3,21 @@ import sinon from "sinon";
 import {toBufferBE} from "bigint-buffer";
 import bls from "@chainsafe/bls";
 import {toHexString} from "@chainsafe/ssz";
-import {Root} from "@lodestar/types";
+import {RootHex} from "@lodestar/types";
 import {routes} from "@lodestar/api";
+import {toHex} from "@lodestar/utils";
 import {BlockDutiesService} from "../../../src/services/blockDuties.js";
 import {ValidatorStore} from "../../../src/services/validatorStore.js";
 import {getApiClientStub} from "../../utils/apiStub.js";
 import {loggerVc} from "../../utils/logger.js";
 import {ClockMock} from "../../utils/clock.js";
 import {initValidatorStore} from "../../utils/validatorStore.js";
+import {ZERO_HASH_HEX} from "../../utils/types.js";
 
-type ProposerDutiesRes = {dependentRoot: Root; data: routes.validator.ProposerDuty[]};
+type ProposerDutiesRes = {dependentRoot: RootHex; data: routes.validator.ProposerDuty[]};
 
 describe("BlockDutiesService", function () {
   const sandbox = sinon.createSandbox();
-  const ZERO_HASH = Buffer.alloc(32, 0);
 
   const api = getApiClientStub(sandbox);
   let validatorStore: ValidatorStore;
@@ -36,10 +37,10 @@ describe("BlockDutiesService", function () {
     // Reply with some duties
     const slot = 0; // genesisTime is right now, so test with slot = currentSlot
     const duties: ProposerDutiesRes = {
-      dependentRoot: ZERO_HASH,
+      dependentRoot: ZERO_HASH_HEX,
       data: [{slot: slot, validatorIndex: 0, pubkey: pubkeys[0]}],
     };
-    api.validator.getProposerDuties.resolves(duties);
+    api.validator.getProposerDuties.resolves({...duties, executionOptimistic: false});
 
     const notifyBlockProductionFn = sinon.stub(); // Returns void
 
@@ -65,13 +66,13 @@ describe("BlockDutiesService", function () {
 
   it("Should call notifyBlockProductionFn again on duties re-org", async () => {
     // A re-org will happen at slot 1
-    const DIFF_HASH = Buffer.alloc(32, 1);
+    const dependentRootDiff = toHex(Buffer.alloc(32, 1));
     const dutiesBeforeReorg: ProposerDutiesRes = {
-      dependentRoot: ZERO_HASH,
+      dependentRoot: ZERO_HASH_HEX,
       data: [{slot: 1, validatorIndex: 0, pubkey: pubkeys[0]}],
     };
     const dutiesAfterReorg: ProposerDutiesRes = {
-      dependentRoot: DIFF_HASH,
+      dependentRoot: dependentRootDiff,
       data: [{slot: 1, validatorIndex: 1, pubkey: pubkeys[1]}],
     };
 
@@ -82,11 +83,11 @@ describe("BlockDutiesService", function () {
     const dutiesService = new BlockDutiesService(loggerVc, api, clock, validatorStore, null, notifyBlockProductionFn);
 
     // Trigger clock onSlot for slot 0
-    api.validator.getProposerDuties.resolves(dutiesBeforeReorg);
+    api.validator.getProposerDuties.resolves({...dutiesBeforeReorg, executionOptimistic: false});
     await clock.tickSlotFns(0, controller.signal);
 
     // Trigger clock onSlot for slot 1 - Return different duties for slot 1
-    api.validator.getProposerDuties.resolves(dutiesAfterReorg);
+    api.validator.getProposerDuties.resolves({...dutiesAfterReorg, executionOptimistic: false});
     await clock.tickSlotFns(1, controller.signal);
 
     // Should persist the dutiesAfterReorg
@@ -114,7 +115,7 @@ describe("BlockDutiesService", function () {
     // Reply with some duties
     const slot = 0; // genesisTime is right now, so test with slot = currentSlot
     const duties: ProposerDutiesRes = {
-      dependentRoot: ZERO_HASH,
+      dependentRoot: ZERO_HASH_HEX,
       data: [
         {slot: slot, validatorIndex: 0, pubkey: pubkeys[0]},
         {slot: slot, validatorIndex: 1, pubkey: pubkeys[1]},
@@ -123,13 +124,13 @@ describe("BlockDutiesService", function () {
     };
 
     const dutiesRemoved: ProposerDutiesRes = {
-      dependentRoot: ZERO_HASH,
+      dependentRoot: ZERO_HASH_HEX,
       data: [
         {slot: slot, validatorIndex: 1, pubkey: pubkeys[1]},
         {slot: 33, validatorIndex: 2, pubkey: pubkeys[2]},
       ],
     };
-    api.validator.getProposerDuties.resolves(duties);
+    api.validator.getProposerDuties.resolves({...duties, executionOptimistic: false});
 
     const notifyBlockProductionFn = sinon.stub(); // Returns void
 

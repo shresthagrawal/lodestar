@@ -1,4 +1,4 @@
-import {bellatrix, RootHex} from "@lodestar/types";
+import {RootHex, allForks} from "@lodestar/types";
 import {DATA, QUANTITY} from "../../eth1/provider/utils.js";
 import {PayloadIdCache, PayloadId, ApiPayloadAttributes} from "./payloadIdCache.js";
 
@@ -28,7 +28,7 @@ export enum ExecutePayloadStatus {
 export type ExecutePayloadResponse =
   | {status: ExecutePayloadStatus.SYNCING | ExecutePayloadStatus.ACCEPTED; latestValidHash: null; validationError: null}
   | {status: ExecutePayloadStatus.VALID; latestValidHash: RootHex; validationError: null}
-  | {status: ExecutePayloadStatus.INVALID; latestValidHash: RootHex; validationError: string | null}
+  | {status: ExecutePayloadStatus.INVALID; latestValidHash: RootHex | null; validationError: string | null}
   | {
       status: ExecutePayloadStatus.INVALID_BLOCK_HASH | ExecutePayloadStatus.ELERROR | ExecutePayloadStatus.UNAVAILABLE;
       latestValidHash: null;
@@ -71,7 +71,7 @@ export interface IExecutionEngine {
    *
    * Should be called in advance before, after or in parallel to block processing
    */
-  notifyNewPayload(executionPayload: bellatrix.ExecutionPayload): Promise<ExecutePayloadResponse>;
+  notifyNewPayload(executionPayload: allForks.ExecutionPayload): Promise<ExecutePayloadResponse>;
 
   /**
    * Signal fork choice updates
@@ -99,7 +99,7 @@ export interface IExecutionEngine {
    * Required for block producing
    * https://github.com/ethereum/consensus-specs/blob/dev/specs/merge/validator.md#get_payload
    */
-  getPayload(payloadId: PayloadId): Promise<bellatrix.ExecutionPayload>;
+  getPayload(payloadId: PayloadId): Promise<allForks.ExecutionPayload>;
 
   exchangeTransitionConfigurationV1(
     transitionConfiguration: TransitionConfigurationV1

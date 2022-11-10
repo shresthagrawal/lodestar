@@ -5,18 +5,6 @@ import {RouteDef, TypeJson} from "../../utils/index.js";
 
 // See /packages/api/src/routes/index.ts for reasoning and instructions to add new routes
 
-export type LightclientOptimisticHeaderUpdate = {
-  syncAggregate: altair.SyncAggregate;
-  attestedHeader: phase0.BeaconBlockHeader;
-};
-
-export type LightclientFinalizedUpdate = {
-  attestedHeader: phase0.BeaconBlockHeader;
-  finalizedHeader: phase0.BeaconBlockHeader;
-  finalityBranch: Uint8Array[];
-  syncAggregate: altair.SyncAggregate;
-};
-
 export enum EventType {
   /**
    * The node has finished processing, resulting in a new head. previous_duty_dependent_root is
@@ -35,10 +23,14 @@ export enum EventType {
   finalizedCheckpoint = "finalized_checkpoint",
   /** The node has reorganized its chain */
   chainReorg = "chain_reorg",
+  /** The node has received a valid sync committee SignedContributionAndProof (from P2P or API) */
+  contributionAndProof = "contribution_and_proof",
   /** New or better optimistic header update available */
-  lightclientOptimisticUpdate = "light_client_optimistic_update",
-  /** New or better finalized update available */
-  lightclientFinalizedUpdate = "light_client_finalized_update",
+  lightClientOptimisticUpdate = "light_client_optimistic_update",
+  /** New or better finality update available */
+  lightClientFinalityUpdate = "light_client_finality_update",
+  /** New or better light client update available */
+  lightClientUpdate = "light_client_update",
 }
 
 export type EventData = {
@@ -49,11 +41,21 @@ export type EventData = {
     epochTransition: boolean;
     previousDutyDependentRoot: RootHex;
     currentDutyDependentRoot: RootHex;
+    executionOptimistic: boolean;
   };
-  [EventType.block]: {slot: Slot; block: RootHex};
+  [EventType.block]: {
+    slot: Slot;
+    block: RootHex;
+    executionOptimistic: boolean;
+  };
   [EventType.attestation]: phase0.Attestation;
   [EventType.voluntaryExit]: phase0.SignedVoluntaryExit;
-  [EventType.finalizedCheckpoint]: {block: RootHex; state: RootHex; epoch: Epoch};
+  [EventType.finalizedCheckpoint]: {
+    block: RootHex;
+    state: RootHex;
+    epoch: Epoch;
+    executionOptimistic: boolean;
+  };
   [EventType.chainReorg]: {
     slot: Slot;
     depth: UintNum64;
@@ -62,9 +64,12 @@ export type EventData = {
     oldHeadState: RootHex;
     newHeadState: RootHex;
     epoch: Epoch;
+    executionOptimistic: boolean;
   };
-  [EventType.lightclientOptimisticUpdate]: LightclientOptimisticHeaderUpdate;
-  [EventType.lightclientFinalizedUpdate]: LightclientFinalizedUpdate;
+  [EventType.contributionAndProof]: altair.SignedContributionAndProof;
+  [EventType.lightClientOptimisticUpdate]: altair.LightClientOptimisticUpdate;
+  [EventType.lightClientFinalityUpdate]: altair.LightClientFinalityUpdate;
+  [EventType.lightClientUpdate]: altair.LightClientUpdate;
 };
 
 export type BeaconEvent = {[K in EventType]: {type: K; message: EventData[K]}}[EventType];
@@ -106,6 +111,7 @@ export function getTypeByEvent(): {[K in EventType]: Type<EventData[K]>} {
         epochTransition: ssz.Boolean,
         previousDutyDependentRoot: stringType,
         currentDutyDependentRoot: stringType,
+        executionOptimistic: ssz.Boolean,
       },
       {jsonCase: "eth2"}
     ),
@@ -114,6 +120,7 @@ export function getTypeByEvent(): {[K in EventType]: Type<EventData[K]>} {
       {
         slot: ssz.Slot,
         block: stringType,
+        executionOptimistic: ssz.Boolean,
       },
       {jsonCase: "eth2"}
     ),
@@ -126,6 +133,7 @@ export function getTypeByEvent(): {[K in EventType]: Type<EventData[K]>} {
         block: stringType,
         state: stringType,
         epoch: ssz.Epoch,
+        executionOptimistic: ssz.Boolean,
       },
       {jsonCase: "eth2"}
     ),
@@ -139,26 +147,32 @@ export function getTypeByEvent(): {[K in EventType]: Type<EventData[K]>} {
         oldHeadState: stringType,
         newHeadState: stringType,
         epoch: ssz.Epoch,
+        executionOptimistic: ssz.Boolean,
       },
       {jsonCase: "eth2"}
     ),
 
-    [EventType.lightclientOptimisticUpdate]: new ContainerType(
+    [EventType.contributionAndProof]: ssz.altair.SignedContributionAndProof,
+
+    [EventType.lightClientOptimisticUpdate]: new ContainerType(
       {
         syncAggregate: ssz.altair.SyncAggregate,
         attestedHeader: ssz.phase0.BeaconBlockHeader,
+        signatureSlot: ssz.Slot,
       },
       {jsonCase: "eth2"}
     ),
-    [EventType.lightclientFinalizedUpdate]: new ContainerType(
+    [EventType.lightClientFinalityUpdate]: new ContainerType(
       {
         attestedHeader: ssz.phase0.BeaconBlockHeader,
         finalizedHeader: ssz.phase0.BeaconBlockHeader,
         finalityBranch: new VectorCompositeType(ssz.Bytes32, FINALIZED_ROOT_DEPTH),
         syncAggregate: ssz.altair.SyncAggregate,
+        signatureSlot: ssz.Slot,
       },
       {jsonCase: "eth2"}
     ),
+    [EventType.lightClientUpdate]: ssz.altair.LightClientUpdate,
   };
 }
 

@@ -14,20 +14,28 @@ import {
   ZERO_HASH,
   EffectiveBalanceIncrements,
   CachedBeaconStateAllForks,
-  isBellatrixBlockBodyType,
-  isBellatrixStateType,
+  isExecutionBlockBodyType,
+  isExecutionStateType,
   isExecutionEnabled,
+  getAttesterSlashableIndices,
 } from "@lodestar/state-transition";
 import {computeUnrealizedCheckpoints} from "@lodestar/state-transition/epoch";
 import {IChainConfig, IChainForkConfig} from "@lodestar/config";
 
 import {computeDeltas} from "../protoArray/computeDeltas.js";
-import {HEX_ZERO_HASH, VoteTracker, ProtoBlock, ExecutionStatus} from "../protoArray/interface.js";
+import {
+  HEX_ZERO_HASH,
+  VoteTracker,
+  ProtoBlock,
+  ExecutionStatus,
+  MaybeValidExecutionStatus,
+  LVHExecResponse,
+} from "../protoArray/interface.js";
 import {ProtoArray} from "../protoArray/protoArray.js";
+import {ProtoArrayError, ProtoArrayErrorCode} from "../protoArray/errors.js";
 
-import {IForkChoiceMetrics} from "../metrics.js";
 import {ForkChoiceError, ForkChoiceErrorCode, InvalidBlockCode, InvalidAttestationCode} from "./errors.js";
-import {IForkChoice, LatestMessage, QueuedAttestation, PowBlockHex} from "./interface.js";
+import {IForkChoice, LatestMessage, QueuedAttestation, PowBlockHex, EpochDifference} from "./interface.js";
 import {IForkChoiceStore, CheckpointWithHex, toCheckpointWithHex, JustifiedBalances} from "./store.js";
 
 /* eslint-disable max-len */
@@ -35,6 +43,7 @@ import {IForkChoiceStore, CheckpointWithHex, toCheckpointWithHex, JustifiedBalan
 export type ForkChoiceOpts = {
   proposerBoostEnabled?: boolean;
   computeUnrealized?: boolean;
+  countUnrealizedFull?: boolean;
 };
 
 /**
@@ -55,6 +64,7 @@ export type ForkChoiceOpts = {
  * - Time is not updated automatically, updateTime MUST be called every slot
  */
 export class ForkChoice implements IForkChoice {
+  irrecoverableError?: Error;
   /**
    * Votes currently tracked in the protoArray
    * Indexed by validator index
@@ -93,8 +103,7 @@ export class ForkChoice implements IForkChoice {
     private readonly fcStore: IForkChoiceStore,
     /** The underlying representation of the block DAG. */
     private readonly protoArray: ProtoArray,
-    private readonly opts?: ForkChoiceOpts,
-    private readonly metrics?: IForkChoiceMetrics | null
+    private readonly opts?: ForkChoiceOpts
   ) {
     this.head = this.updateHead();
   }
@@ -175,9 +184,6 @@ export class ForkChoice implements IForkChoice {
   updateHead(): ProtoBlock {
     // balances is not changed but votes are changed
 
-    this.metrics?.forkChoiceRequests.inc();
-    const timer = this.metrics?.forkChoiceFindHead.startTimer();
-
     // NOTE: In current Lodestar metrics, 100% of forkChoiceRequests this.synced = false.
     // No need to cache computeDeltas()
     //
@@ -187,7 +193,13 @@ export class ForkChoice implements IForkChoice {
     // Check if scores need to be calculated/updated
     // eslint-disable-next-line prefer-const
     const justifiedBalances = this.fcStore.justified.balances;
-    const deltas = computeDeltas(this.protoArray.indices, this.votes, justifiedBalances, justifiedBalances);
+    const deltas = computeDeltas(
+      this.protoArray.indices,
+      this.votes,
+      justifiedBalances,
+      justifiedBalances,
+      this.fcStore.equivocatingIndices
+    );
     /**
      * The structure in line with deltas to propogate boost up the branch
      * starting from the proposerIndex
@@ -231,9 +243,16 @@ export class ForkChoice implements IForkChoice {
       });
     }
 
-    timer?.();
-
     return (this.head = headNode);
+  }
+
+  /**
+   * An iteration over protoArray to get present slots, to be called pre-emptively
+   * from prepareNextSlot to prevent delay on produceBlindedBlock
+   * @param windowStart is the slot after which (excluding) to provide present slots
+   */
+  getSlotsPresent(windowStart: number): number {
+    return this.protoArray.nodes.filter((node) => node.slot > windowStart).length;
   }
 
   /** Very expensive function, iterates the entire ProtoArray. Called only in debug API */
@@ -277,7 +296,7 @@ export class ForkChoice implements IForkChoice {
     state: CachedBeaconStateAllForks,
     blockDelaySec: number,
     currentSlot: Slot,
-    executionStatus: ExecutionStatus
+    executionStatus: MaybeValidExecutionStatus
   ): void {
     const {parentRoot, slot} = block;
     const parentRootHex = toHexString(parentRoot);
@@ -454,7 +473,7 @@ export class ForkChoice implements IForkChoice {
         unrealizedFinalizedEpoch: unrealizedFinalizedCheckpoint.epoch,
         unrealizedFinalizedRoot: unrealizedFinalizedCheckpoint.rootHex,
 
-        ...(isBellatrixBlockBodyType(block.body) && isBellatrixStateType(state) && isExecutionEnabled(state, block)
+        ...(isExecutionBlockBodyType(block.body) && isExecutionStateType(state) && isExecutionEnabled(state, block)
           ? {
               executionPayloadBlockHash: toHexString(block.body.executionPayload.blockHash),
               executionStatus: this.getPostMergeExecStatus(executionStatus),
@@ -509,7 +528,9 @@ export class ForkChoice implements IForkChoice {
 
     if (slot < this.fcStore.currentSlot) {
       for (const validatorIndex of attestation.attestingIndices) {
-        this.addLatestMessage(validatorIndex, targetEpoch, blockRootHex);
+        if (!this.fcStore.equivocatingIndices.has(validatorIndex)) {
+          this.addLatestMessage(validatorIndex, targetEpoch, blockRootHex);
+        }
       }
     } else {
       // The spec declares:
@@ -525,6 +546,17 @@ export class ForkChoice implements IForkChoice {
         targetEpoch,
       });
     }
+  }
+
+  /**
+   * Small different from the spec:
+   * We already call is_slashable_attestation_data() and is_valid_indexed_attestation
+   * in state transition so no need to do it again
+   */
+  onAttesterSlashing(attesterSlashing: phase0.AttesterSlashing): void {
+    // TODO: we already call in in state-transition, find a way not to recompute it again
+    const intersectingIndices = getAttesterSlashableIndices(attesterSlashing);
+    intersectingIndices.forEach((validatorIndex) => this.fcStore.equivocatingIndices.add(validatorIndex));
   }
 
   getLatestMessage(validatorIndex: ValidatorIndex): LatestMessage | undefined {
@@ -743,60 +775,85 @@ export class ForkChoice implements IForkChoice {
   }
 
   /**
-   * Optimistic sync validate till validated latest hash, invalidate any decendant branch if invalidate till hash provided
-   * TODO: implementation:
-   * 1. verify is_merge_block if the mergeblock has not yet been validated
-   * 2. Throw critical error and exit if a block in finalized chain gets invalidated
+   * Optimistic sync validate till validated latest hash, invalidate any decendant
+   * branch if invalidate till hash provided
+   *
+   * Proxies to protoArray's validateLatestHash and could run extra validations for the
+   * justified's status as well as validate the terminal conditions if terminal block
+   * becomes valid
    */
-  validateLatestHash(_latestValidHash: RootHex, _invalidateTillHash: RootHex | null): void {
-    // Silently ignore for now if all calls were valid
-    return;
+  validateLatestHash(execResponse: LVHExecResponse): void {
+    try {
+      this.protoArray.validateLatestHash(execResponse, this.fcStore.currentSlot);
+    } catch (e) {
+      if (e instanceof ProtoArrayError && e.type.code === ProtoArrayErrorCode.INVALID_LVH_EXECUTION_RESPONSE) {
+        this.irrecoverableError = e;
+      }
+    }
   }
 
   /**
-   * Find dependent root of a head block
-   * epoch - 2 | epoch - 1 | epoch
-   * pivotSlot |     -     | blockSlot
+   * A dependent root is the block root of the last block before the state transition that decided a specific shuffling
+   *
+   * For proposer shuffling with 0 epochs of lookahead = previous immediate epoch transition
+   * For attester shuffling with 1 epochs of lookahead = last epoch's epoch transition
+   *
+   * ```
+   *         epoch: 0       1       2       3       4
+   *                |-------|-------|=======|-------|
+   * dependent root A -------------^
+   * dependent root B -----^
+   * ```
+   * - proposer shuffling for a block in epoch 2: dependent root A (EpochDifference = 0)
+   * - attester shuffling for a block in epoch 2: dependent root B (EpochDifference = 1)
    */
-  findAttesterDependentRoot(headBlockHash: Root): RootHex | null {
-    let block = this.getBlock(headBlockHash);
-    if (!block) return null;
-    const {slot} = block;
-    // The shuffling is determined by the block at the end of the target epoch
-    // minus the shuffling lookahead (usually 2). We call this the "pivot".
-    const pivotSlot = computeStartSlotAtEpoch(computeEpochAtSlot(slot) - 1) - 1;
+  getDependentRoot(block: ProtoBlock, epochDifference: EpochDifference): RootHex {
+    // The navigation at the end of the while loop will always progress backwards,
+    // jumping to a block with a strictly less slot number. So the condition `blockEpoch < atEpoch`
+    // is guaranteed to happen. Given the use of target blocks for faster navigation, it will take
+    // at most `2 * (blockEpoch - atEpoch + 1)` iterations to find the dependant root.
 
-    // 1st hop: target block
-    block = this.getBlockHex(block.targetRoot);
-    if (!block) return null;
-    if (block.slot <= pivotSlot) return block.blockRoot;
-    // or parent of target block
-    block = this.getBlockHex(block.parentRoot);
-    if (!block) return null;
-    if (block.slot <= pivotSlot) return block.blockRoot;
+    const beforeSlot = block.slot - (block.slot % SLOTS_PER_EPOCH) - epochDifference * SLOTS_PER_EPOCH;
 
-    // 2nd hop: go back 1 more epoch, target block
-    block = this.getBlockHex(block.targetRoot);
-    if (!block) return null;
-    if (block.slot <= pivotSlot) return block.blockRoot;
-    // or parent of target block
-    block = this.getBlockHex(block.parentRoot);
-    if (!block) return null;
-    // most of the time, in a stable network, it reaches here
-    if (block.slot <= pivotSlot) return block.blockRoot;
+    // Special case close to genesis block, return the genesis block root
+    if (beforeSlot <= 0) {
+      const genesisBlock = this.protoArray.nodes[0];
+      if (genesisBlock === undefined || genesisBlock.slot !== 0) {
+        throw Error("Genesis block not available");
+      }
+      return genesisBlock.blockRoot;
+    }
 
-    throw Error(
-      `Not able to find attester dependent root for head ${headBlockHash}, slot ${slot}, pivotSlot ${pivotSlot}, last tried slot ${block.slot}`
-    );
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      // Dependant root must be in epoch less than `beforeSlot`
+      if (block.slot < beforeSlot) {
+        return block.blockRoot;
+      }
+
+      // Skip one last jump if there's no skipped slot at first slot of the epoch
+      if (block.slot === beforeSlot) {
+        return block.parentRoot;
+      }
+
+      block =
+        block.blockRoot === block.targetRoot
+          ? // For the first slot of the epoch, a block is it's own target
+            this.protoArray.getBlockReadonly(block.parentRoot)
+          : // else we can navigate much faster jumping to the target block
+            this.protoArray.getBlockReadonly(block.targetRoot);
+    }
   }
 
-  private getPreMergeExecStatus(executionStatus: ExecutionStatus): ExecutionStatus.PreMerge {
+  private getPreMergeExecStatus(executionStatus: MaybeValidExecutionStatus): ExecutionStatus.PreMerge {
     if (executionStatus !== ExecutionStatus.PreMerge)
       throw Error(`Invalid pre-merge execution status: expected: ${ExecutionStatus.PreMerge}, got ${executionStatus}`);
     return executionStatus;
   }
 
-  private getPostMergeExecStatus(executionStatus: ExecutionStatus): ExecutionStatus.Valid | ExecutionStatus.Syncing {
+  private getPostMergeExecStatus(
+    executionStatus: MaybeValidExecutionStatus
+  ): ExecutionStatus.Valid | ExecutionStatus.Syncing {
     if (executionStatus === ExecutionStatus.PreMerge)
       throw Error(
         `Invalid post-merge execution status: expected: ${ExecutionStatus.Syncing} or ${ExecutionStatus.Valid} , got ${executionStatus}`

@@ -1,6 +1,7 @@
 import deepmerge from "deepmerge";
 import tmp from "tmp";
-import PeerId from "peer-id";
+import {PeerId} from "@libp2p/interface-peer-id";
+import {createSecp256k1PeerId} from "@libp2p/peer-id-factory";
 import {config as minimalConfig} from "@lodestar/config/default";
 import {createIBeaconConfig, createIChainForkConfig, IChainConfig} from "@lodestar/config";
 import {ILogger, RecursivePartial} from "@lodestar/utils";
@@ -9,10 +10,9 @@ import {phase0} from "@lodestar/types";
 import {GENESIS_SLOT} from "@lodestar/params";
 import {BeaconStateAllForks} from "@lodestar/state-transition";
 import {isPlainObject} from "@lodestar/utils";
+import {createKeypairFromPeerId, ENR} from "@chainsafe/discv5";
 import {BeaconNode} from "../../../src/index.js";
-import {createEnr} from "../../../../cli/src/config/enr.js";
 import {createNodeJsLibp2p} from "../../../src/network/nodejs/index.js";
-import {createPeerId} from "../../../src/network/index.js";
 import {defaultNetworkOptions} from "../../../src/network/options.js";
 import {initDevState, writeDeposits} from "../../../src/node/utils/state.js";
 import {IBeaconNodeOptions} from "../../../src/node/options.js";
@@ -36,12 +36,12 @@ export async function getDevBeaconNode(
   const {params, validatorCount = 8, peerStoreDir} = opts;
   let {options = {}, logger, peerId} = opts;
 
-  if (!peerId) peerId = await createPeerId();
+  if (!peerId) peerId = await createSecp256k1PeerId();
   const tmpDir = tmp.dirSync({unsafeCleanup: true});
   const config = createIChainForkConfig({...minimalConfig, ...params});
   logger = logger ?? testLogger();
 
-  const db = new BeaconDb({config, controller: new LevelDbController({name: tmpDir.name}, {logger})});
+  const db = new BeaconDb({config, controller: new LevelDbController({name: tmpDir.name}, {})});
   await db.start();
 
   const libp2p = await createNodeJsLibp2p(
@@ -99,10 +99,17 @@ export async function getDevBeaconNode(
     config: beaconConfig,
     db,
     logger,
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    processShutdownCallback: () => {},
     libp2p,
     anchorState,
     wsCheckpoint: opts.wsCheckpoint,
   });
+}
+
+function createEnr(peerId: PeerId): ENR {
+  const keypair = createKeypairFromPeerId(peerId);
+  return ENR.createV4(keypair.publicKey);
 }
 
 function overwriteTargetArrayIfItems(target: unknown[], source: unknown[]): unknown[] {

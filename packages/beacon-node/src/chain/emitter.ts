@@ -2,7 +2,7 @@ import {EventEmitter} from "events";
 import StrictEventEmitter from "strict-event-emitter-types";
 
 import {routes} from "@lodestar/api";
-import {phase0, Epoch, Slot, allForks} from "@lodestar/types";
+import {phase0, Epoch, Slot, allForks, altair} from "@lodestar/types";
 import {CheckpointWithHex, ProtoBlock} from "@lodestar/fork-choice";
 import {CachedBeaconStateAllForks} from "@lodestar/state-transition";
 
@@ -22,6 +22,8 @@ export enum ChainEvent {
    * This event is guaranteed to be emitted after every attestation fed to the chain has successfully been passed to the fork choice.
    */
   attestation = "attestation",
+  /** The node has received a valid sync committee SignedContributionAndProof (from P2P or API) */
+  contributionAndProof = "contribution_and_proof",
   /**
    * This event signals that the chain has successfully processed a valid block.
    *
@@ -64,7 +66,7 @@ export enum ChainEvent {
    *
    * This event is guaranteed to be emitted after every sucessfully processed block, if that block updates the head.
    */
-  forkChoiceHead = "forkChoice:head",
+  head = "forkChoice:head",
   /**
    * This event signals that the fork choice has been updated to a new head that is not a descendant of the previous head.
    *
@@ -86,15 +88,22 @@ export enum ChainEvent {
   /**
    * A new lightclient optimistic header update is available to be broadcasted to connected light-clients
    */
-  lightclientOptimisticUpdate = "lightclient:header_update",
+  lightClientOptimisticUpdate = "lightclient:header_update",
   /**
    * A new lightclient finalized header update is available to be broadcasted to connected light-clients
    */
-  lightclientFinalizedUpdate = "lightclient:finalized_update",
+  lightClientFinalityUpdate = "lightclient:finality_update",
+  /**
+   * A new lightclient update is available to be broadcasted to connected light-clients
+   */
+  lightClientUpdate = "lightclient:update",
 }
+
+export type HeadEventData = routes.events.EventData[routes.events.EventType.head];
 
 export interface IChainEvents {
   [ChainEvent.attestation]: (attestation: phase0.Attestation) => void;
+  [ChainEvent.contributionAndProof]: (contributionAndProof: altair.SignedContributionAndProof) => void;
   [ChainEvent.block]: (signedBlock: allForks.SignedBeaconBlock, postState: CachedBeaconStateAllForks) => void;
 
   [ChainEvent.checkpoint]: (checkpoint: phase0.Checkpoint, state: CachedBeaconStateAllForks) => void;
@@ -104,13 +113,14 @@ export interface IChainEvents {
   [ChainEvent.clockSlot]: (slot: Slot) => void;
   [ChainEvent.clockEpoch]: (epoch: Epoch) => void;
 
-  [ChainEvent.forkChoiceHead]: (head: ProtoBlock) => void;
+  [ChainEvent.head]: (data: HeadEventData) => void;
   [ChainEvent.forkChoiceReorg]: (head: ProtoBlock, oldHead: ProtoBlock, depth: number) => void;
   [ChainEvent.forkChoiceJustified]: (checkpoint: CheckpointWithHex) => void;
   [ChainEvent.forkChoiceFinalized]: (checkpoint: CheckpointWithHex) => void;
 
-  [ChainEvent.lightclientOptimisticUpdate]: (optimisticUpdate: routes.events.LightclientOptimisticHeaderUpdate) => void;
-  [ChainEvent.lightclientFinalizedUpdate]: (finalizedUpdate: routes.events.LightclientFinalizedUpdate) => void;
+  [ChainEvent.lightClientOptimisticUpdate]: (optimisticUpdate: altair.LightClientOptimisticUpdate) => void;
+  [ChainEvent.lightClientFinalityUpdate]: (finalizedUpdate: altair.LightClientFinalityUpdate) => void;
+  [ChainEvent.lightClientUpdate]: (update: altair.LightClientUpdate) => void;
 }
 
 /**

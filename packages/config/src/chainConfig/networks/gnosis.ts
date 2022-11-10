@@ -11,6 +11,7 @@ export const gnosisChainConfig: IChainConfig = {
 
   // NOTE: Only add diff values
   PRESET_BASE: PresetName.gnosis,
+  CONFIG_NAME: "gnosis",
 
   SECONDS_PER_SLOT: 5,
   SECONDS_PER_ETH1_BLOCK: 6,
@@ -34,7 +35,4 @@ export const gnosisChainConfig: IChainConfig = {
   // Bellatrix
   BELLATRIX_FORK_VERSION: b("0x02000064"),
   BELLATRIX_FORK_EPOCH: Infinity,
-  // Sharding
-  SHARDING_FORK_VERSION: b("0x03000064"),
-  SHARDING_FORK_EPOCH: Infinity,
 };

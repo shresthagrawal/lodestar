@@ -1,4 +1,4 @@
-import {bellatrix, Slot, Root, BLSPubkey, ssz} from "@lodestar/types";
+import {allForks, bellatrix, Slot, Root, BLSPubkey, ssz} from "@lodestar/types";
 import {IChainForkConfig} from "@lodestar/config";
 import {getClient, Api as BuilderApi} from "@lodestar/api/builder";
 import {byteArrayEquals, toHexString} from "@chainsafe/ssz";
@@ -22,6 +22,8 @@ export const defaultExecutionBuilderHttpOpts: ExecutionBuilderHttpOpts = {
 export class ExecutionBuilderHttp implements IExecutionBuilder {
   readonly api: BuilderApi;
   readonly issueLocalFcUForBlockProduction?: boolean;
+  // Builder needs to be explicity enabled using updateStatus
+  status = false;
 
   constructor(opts: ExecutionBuilderHttpOpts, config: IChainForkConfig) {
     const baseUrl = opts.urls[0];
@@ -30,24 +32,32 @@ export class ExecutionBuilderHttp implements IExecutionBuilder {
     this.issueLocalFcUForBlockProduction = opts.issueLocalFcUForBlockProduction;
   }
 
+  updateStatus(shouldEnable: boolean): void {
+    this.status = shouldEnable;
+  }
+
+  async checkStatus(): Promise<void> {
+    try {
+      await this.api.status();
+    } catch (e) {
+      // Disable if the status was enabled
+      this.status = false;
+      throw e;
+    }
+  }
+
   async registerValidator(registrations: bellatrix.SignedValidatorRegistrationV1[]): Promise<void> {
     return this.api.registerValidator(registrations);
   }
 
-  async getPayloadHeader(
-    slot: Slot,
-    parentHash: Root,
-    proposerPubKey: BLSPubkey
-  ): Promise<bellatrix.ExecutionPayloadHeader> {
-    const {data: signedBid} = await this.api.getPayloadHeader(slot, parentHash, proposerPubKey);
+  async getHeader(slot: Slot, parentHash: Root, proposerPubKey: BLSPubkey): Promise<allForks.ExecutionPayloadHeader> {
+    const {data: signedBid} = await this.api.getHeader(slot, parentHash, proposerPubKey);
     const executionPayloadHeader = signedBid.message.header;
     return executionPayloadHeader;
   }
 
-  async submitSignedBlindedBlock(
-    signedBlock: bellatrix.SignedBlindedBeaconBlock
-  ): Promise<bellatrix.SignedBeaconBlock> {
-    const {data: executionPayload} = await this.api.submitSignedBlindedBlock(signedBlock);
+  async submitBlindedBlock(signedBlock: allForks.SignedBlindedBeaconBlock): Promise<allForks.SignedBeaconBlock> {
+    const {data: executionPayload} = await this.api.submitBlindedBlock(signedBlock);
     const expectedTransactionsRoot = signedBlock.message.body.executionPayloadHeader.transactionsRoot;
     const actualTransactionsRoot = ssz.bellatrix.Transactions.hashTreeRoot(executionPayload.transactions);
     if (!byteArrayEquals(expectedTransactionsRoot, actualTransactionsRoot)) {

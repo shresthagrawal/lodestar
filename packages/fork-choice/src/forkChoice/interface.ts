@@ -1,7 +1,7 @@
 import {EffectiveBalanceIncrements} from "@lodestar/state-transition";
 import {CachedBeaconStateAllForks} from "@lodestar/state-transition";
 import {Epoch, Slot, ValidatorIndex, phase0, allForks, Root, RootHex} from "@lodestar/types";
-import {ProtoBlock, ExecutionStatus} from "../protoArray/interface.js";
+import {ProtoBlock, MaybeValidExecutionStatus, LVHExecResponse} from "../protoArray/interface.js";
 import {CheckpointWithHex} from "./store.js";
 
 export type CheckpointHex = {
@@ -19,7 +19,13 @@ export type CheckpointHexWithBalance = {
   balances: EffectiveBalanceIncrements;
 };
 
+export enum EpochDifference {
+  current = 0,
+  previous = 1,
+}
+
 export interface IForkChoice {
+  irrecoverableError?: Error;
   /**
    * Returns the block root of an ancestor of `block_root` at the given `slot`. (Note: `slot` refers
    * to the block that is *returned*, not the one that is supplied.)
@@ -70,7 +76,7 @@ export interface IForkChoice {
     state: CachedBeaconStateAllForks,
     blockDelaySec: number,
     currentSlot: Slot,
-    executionStatus: ExecutionStatus
+    executionStatus: MaybeValidExecutionStatus
   ): void;
   /**
    * Register `attestation` with the fork choice DAG so that it may influence future calls to `getHead`.
@@ -91,6 +97,14 @@ export interface IForkChoice {
    * will not be run here.
    */
   onAttestation(attestation: phase0.IndexedAttestation, attDataRoot?: string): void;
+  /**
+   * Register attester slashing in order not to consider their votes in `getHead`
+   *
+   * ## Specification
+   *
+   * https://github.com/ethereum/consensus-specs/blob/v1.2.0-rc.3/specs/phase0/fork-choice.md#on_attester_slashing
+   */
+  onAttesterSlashing(slashing: phase0.AttesterSlashing): void;
   getLatestMessage(validatorIndex: ValidatorIndex): LatestMessage | undefined;
   /**
    * Call `onTick` for all slots between `fcStore.getCurrentSlot()` and the provided `currentSlot`.
@@ -106,6 +120,7 @@ export interface IForkChoice {
    */
   hasBlock(blockRoot: Root): boolean;
   hasBlockHex(blockRoot: RootHex): boolean;
+  getSlotsPresent(windowStart: number): number;
   /**
    * Returns a `ProtoBlock` if the block is known **and** a descendant of the finalized root.
    */
@@ -154,9 +169,12 @@ export interface IForkChoice {
   /**
    * Optimistic sync validate till validated latest hash, invalidate any decendant branch if invalidated branch decendant provided
    */
-  validateLatestHash(latestValidHash: RootHex, invalidateTillHash: RootHex | null): void;
-  /** Find attester dependent root of a block */
-  findAttesterDependentRoot(headBlockHash: Root): RootHex | null;
+  validateLatestHash(execResponse: LVHExecResponse): void;
+
+  /**
+   * A dependent root is the block root of the last block before the state transition that decided a specific shuffling
+   */
+  getDependentRoot(block: ProtoBlock, atEpochDiff: EpochDifference): RootHex;
 }
 
 /** Same to the PowBlock but we want RootHex to work with forkchoice conveniently */

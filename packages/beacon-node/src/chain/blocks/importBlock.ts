@@ -1,12 +1,19 @@
 import {altair, ssz} from "@lodestar/types";
-import {SLOTS_PER_EPOCH} from "@lodestar/params";
+import {MAX_SEED_LOOKAHEAD, SLOTS_PER_EPOCH} from "@lodestar/params";
 import {toHexString} from "@chainsafe/ssz";
-import {CachedBeaconStateAltair, computeEpochAtSlot, RootCache} from "@lodestar/state-transition";
-import {ForkChoiceError, ForkChoiceErrorCode} from "@lodestar/fork-choice";
+import {
+  CachedBeaconStateAltair,
+  computeEpochAtSlot,
+  computeStartSlotAtEpoch,
+  RootCache,
+} from "@lodestar/state-transition";
+import {ForkChoiceError, ForkChoiceErrorCode, EpochDifference} from "@lodestar/fork-choice";
 import {ZERO_HASH_HEX} from "../../constants/index.js";
 import {toCheckpointHex} from "../stateCache/index.js";
+import {isOptimsticBlock} from "../../util/forkChoice.js";
 import {ChainEvent} from "../emitter.js";
 import {REPROCESS_MIN_TIME_TO_NEXT_SLOT_SEC} from "../reprocess.js";
+import {RegenCaller} from "../regen/interface.js";
 import type {BeaconChain} from "../chain.js";
 import {FullyVerifiedBlock, ImportBlockOpts} from "./types.js";
 import {PendingEvents} from "./utils/pendingEvents.js";
@@ -134,6 +141,23 @@ export async function importBlock(
     }
   }
 
+  // FORK_CHOICE_ATT_EPOCH_LIMIT is for attestation to become valid
+  // but AttesterSlashing could be found before that time and still able to submit valid attestations
+  // until slashed validator become inactive, see computeActivationExitEpoch() function
+  if (
+    !opts.skipImportingAttestations &&
+    blockEpoch >= currentEpoch - FORK_CHOICE_ATT_EPOCH_LIMIT - 1 - MAX_SEED_LOOKAHEAD
+  ) {
+    for (const slashing of block.message.body.attesterSlashings) {
+      try {
+        // all AttesterSlashings are valid before reaching this
+        this.forkChoice.onAttesterSlashing(slashing);
+      } catch (e) {
+        this.logger.warn("Error processing AttesterSlashing from block", {slot: block.message.slot}, e as Error);
+      }
+    }
+  }
+
   // - Write block and state to hot db
   // - Write block and state to snapshot_cache
   if (block.message.slot % SLOTS_PER_EPOCH === 0) {
@@ -146,10 +170,10 @@ export async function importBlock(
     // Note: in-lined code from previos handler of ChainEvent.checkpoint
     this.logger.verbose("Checkpoint processed", toCheckpointHex(cp));
 
-    this.metrics?.currentValidators.set(
-      {status: "active"},
-      checkpointState.epochCtx.currentShuffling.activeIndices.length
-    );
+    const activeValidatorsCount = checkpointState.epochCtx.currentShuffling.activeIndices.length;
+    this.metrics?.currentActiveValidators.set(activeValidatorsCount);
+    this.metrics?.currentValidators.set({status: "active"}, activeValidatorsCount);
+
     const parentBlockSummary = this.forkChoice.getBlock(checkpointState.latestBlockHeader.parentRoot);
 
     if (parentBlockSummary) {
@@ -175,18 +199,27 @@ export async function importBlock(
 
   // Emit ChainEvent.forkChoiceHead event
   const oldHead = this.forkChoice.getHead();
-  const newHead = this.forkChoice.updateHead();
+  const newHead = this.recomputeForkChoiceHead();
   const currFinalizedEpoch = this.forkChoice.getFinalizedCheckpoint().epoch;
 
   if (newHead.blockRoot !== oldHead.blockRoot) {
     // new head
-    pendingEvents.push(ChainEvent.forkChoiceHead, newHead);
-    this.metrics?.forkChoiceChangedHead.inc();
+
+    pendingEvents.push(ChainEvent.head, {
+      block: newHead.blockRoot,
+      epochTransition: computeStartSlotAtEpoch(computeEpochAtSlot(newHead.slot)) === newHead.slot,
+      slot: newHead.slot,
+      state: newHead.stateRoot,
+      previousDutyDependentRoot: this.forkChoice.getDependentRoot(newHead, EpochDifference.previous),
+      currentDutyDependentRoot: this.forkChoice.getDependentRoot(newHead, EpochDifference.current),
+      executionOptimistic: isOptimsticBlock(newHead),
+    });
+
+    this.metrics?.forkChoice.changedHead.inc();
 
     const distance = this.forkChoice.getCommonAncestorDistance(oldHead, newHead);
     if (distance !== null) {
       // chain reorg
-      this.metrics?.forkChoiceReorg.inc();
       this.logger.verbose("Chain reorg", {
         depth: distance,
         previousHead: oldHead.blockRoot,
@@ -196,9 +229,11 @@ export async function importBlock(
         newHeadParent: newHead.parentRoot,
         newSlot: newHead.slot,
       });
+
       pendingEvents.push(ChainEvent.forkChoiceReorg, newHead, oldHead, distance);
-      this.metrics?.forkChoiceReorg.inc();
-      this.metrics?.forkChoiceReorgDistance.observe(distance);
+
+      this.metrics?.forkChoice.reorg.inc();
+      this.metrics?.forkChoice.reorgDistance.observe(distance);
     }
 
     // Lightclient server support (only after altair)
@@ -214,6 +249,23 @@ export async function importBlock(
       } catch (e) {
         this.logger.error("Error lightClientServer.onImportBlock", {slot: block.message.slot}, e as Error);
       }
+    }
+
+    // Set head state as strong reference
+    const headState =
+      newHead.stateRoot === toHexString(postState.hashTreeRoot()) ? postState : this.stateCache.get(newHead.stateRoot);
+    if (headState) {
+      this.stateCache.setHeadState(headState);
+    } else {
+      // Trigger regen on head change if necessary
+      this.logger.warn("Head state not available, triggering regen", {stateRoot: newHead.stateRoot});
+      // head has changed, so the existing cached head state is no longer useful. Set strong reference to null to free
+      // up memory for regen step below. During regen, node won't be functional but eventually head will be available
+      this.stateCache.setHeadState(null);
+      this.regen.getState(newHead.stateRoot, RegenCaller.processBlock).then(
+        (headStateRegen) => this.stateCache.setHeadState(headStateRegen),
+        (e) => this.logger.error("Error on head state regen", {}, e)
+      );
     }
   }
 

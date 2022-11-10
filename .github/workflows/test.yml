@@ -1,14 +1,11 @@
 name: Tests
 
-on:
+on: 
   push:
-    branches:
-      - stable
-      - unstable
+    # We intentionally don't run push on feature branches. See PR for rational. 
+    branches: [unstable, stable]
   pull_request:
-    branches:
-      - stable
-      - unstable
+  workflow_dispatch:
 
 jobs:
   tests-main:
@@ -65,9 +62,9 @@ jobs:
       # Test docs generation, even if not published
       - name: Build docs
         run: yarn build:docs
-      # TODO: uncomment after https://github.com/bbc/typescript-docs-verifier/issues/17 is resolved
-      # - name: README check
-      #   run: yarn run check-readme
+
+      - name: README check
+        run: yarn run check-readme
 
       - name: Lint
         run: yarn lint

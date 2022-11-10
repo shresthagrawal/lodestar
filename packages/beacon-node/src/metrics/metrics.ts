@@ -25,7 +25,7 @@ export function createMetrics(
   const genesisTime = anchorState.genesisTime;
   const validatorMonitor = createValidatorMonitor(lodestar, config, genesisTime, logger);
   // Register a single collect() function to run all validatorMonitor metrics
-  lodestar.validatorMonitor.validatorsTotal.addCollect(() => {
+  lodestar.validatorMonitor.validatorsConnected.addCollect(() => {
     const clockSlot = getCurrentSlot(config, genesisTime);
     validatorMonitor.scrapeMetrics(clockSlot);
   });
@@ -37,11 +37,7 @@ export function createMetrics(
 
   // Merge external registries
   for (const externalRegister of externalRegistries) {
-    // Wrong types, does not return a promise
-    const metrics = (externalRegister.getMetricsAsArray() as unknown) as Resolves<
-      typeof externalRegister.getMetricsAsArray
-    >;
-    for (const metric of metrics) {
+    for (const metric of externalRegister.getMetricsAsArray()) {
       register.registerMetric((metric as unknown) as Metric<string>);
     }
   }
@@ -67,6 +63,3 @@ export function collectNodeJSMetrics(register: Registry): void {
   // - nodejs_gc_reclaimed_bytes_total: The number of bytes GC has freed
   gcStats(register)();
 }
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Resolves<F extends (...args: any[]) => Promise<any>> = F extends (...args: any[]) => Promise<infer T> ? T : never;

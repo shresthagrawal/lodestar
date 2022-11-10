@@ -71,13 +71,14 @@ export function assertEqualParams(localConfig: IChainConfig, externalSpecJson: R
 function getSpecCriticalParams(localConfig: IChainConfig): Record<keyof ConfigWithPreset, boolean> {
   const altairForkRelevant = localConfig.ALTAIR_FORK_EPOCH < Infinity;
   const bellatrixForkRelevant = localConfig.BELLATRIX_FORK_EPOCH < Infinity;
-  const shardingForkRelevant = localConfig.SHARDING_FORK_EPOCH < Infinity;
+  const capellaForkRelevant = localConfig.CAPELLA_FORK_EPOCH < Infinity;
 
   return {
     // # Config
     ///////////
 
     PRESET_BASE: false, // Not relevant, each preset value is checked below
+    CONFIG_NAME: false, // Arbitrary string, not relevant
     // validator client behaviour does not change with this parameters, so it's not concerned about them.
     // However, with the override ttd flag, the validator and beacon could be out of sync and prevent it from running.
     TERMINAL_TOTAL_DIFFICULTY: false,
@@ -97,9 +98,9 @@ function getSpecCriticalParams(localConfig: IChainConfig): Record<keyof ConfigWi
     // Bellatrix
     BELLATRIX_FORK_VERSION: bellatrixForkRelevant,
     BELLATRIX_FORK_EPOCH: bellatrixForkRelevant,
-    // Sharding
-    SHARDING_FORK_VERSION: shardingForkRelevant,
-    SHARDING_FORK_EPOCH: shardingForkRelevant,
+    // Capella
+    CAPELLA_FORK_VERSION: capellaForkRelevant,
+    CAPELLA_FORK_EPOCH: capellaForkRelevant,
 
     // Time parameters
     SECONDS_PER_SLOT: true,
@@ -195,5 +196,12 @@ function getSpecCriticalParams(localConfig: IChainConfig): Record<keyof ConfigWi
     MAX_TRANSACTIONS_PER_PAYLOAD: bellatrixForkRelevant,
     BYTES_PER_LOGS_BLOOM: bellatrixForkRelevant,
     MAX_EXTRA_DATA_BYTES: bellatrixForkRelevant,
+
+    // # CapellaPreset
+    /////////////////
+    MAX_PARTIAL_WITHDRAWALS_PER_EPOCH: capellaForkRelevant,
+    WITHDRAWAL_QUEUE_LIMIT: capellaForkRelevant,
+    MAX_BLS_TO_EXECUTION_CHANGES: capellaForkRelevant,
+    MAX_WITHDRAWALS_PER_PAYLOAD: capellaForkRelevant,
   };
 }

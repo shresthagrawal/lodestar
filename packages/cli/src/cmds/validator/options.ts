@@ -1,7 +1,6 @@
 import {defaultOptions} from "@lodestar/validator";
+import {logOptions} from "../../options/logOptions.js";
 import {ensure0xPrefix, ICliCommandOptions, ILogArgs} from "../../util/index.js";
-import {logOptions, beaconPathsOptions} from "../beacon/options.js";
-import {IBeaconPaths} from "../beacon/paths.js";
 import {keymanagerRestApiServerOptsDefault} from "./keymanager/server.js";
 import {defaultAccountPaths, defaultValidatorPaths} from "./paths.js";
 
@@ -9,6 +8,7 @@ export type AccountValidatorArgs = {
   keystoresDir?: string;
   secretsDir?: string;
   remoteKeysDir?: string;
+  proposerDir?: string;
 };
 
 export const validatorMetricsDefaultOptions = {
@@ -17,16 +17,20 @@ export const validatorMetricsDefaultOptions = {
   address: "127.0.0.1",
 };
 
+// Defined as variable to not set yargs.default to an array
+export const DEFAULT_BEACON_NODE_URL = "";
+
 export type IValidatorCliArgs = AccountValidatorArgs &
   KeymanagerArgs &
   ILogArgs & {
-    logFile: IBeaconPaths["logFile"];
     validatorsDbDir?: string;
-    server: string;
+    beaconNodes: string[];
     force: boolean;
     graffiti: string;
     afterBlockDelaySlotFraction?: number;
+    scAfterBlockDelaySlotFraction?: number;
     suggestedFeeRecipient?: string;
+    proposerSettingsFile?: string;
     strictFeeRecipientCheck?: boolean;
     doppelgangerProtectionEnabled?: boolean;
     defaultGasLimit?: number;
@@ -54,6 +58,7 @@ export type KeymanagerArgs = {
   "keymanager.port"?: number;
   "keymanager.address"?: string;
   "keymanager.cors"?: string;
+  "keymanager.bodyLimit"?: number;
 };
 
 export const keymanagerOptions: ICliCommandOptions<KeymanagerArgs> = {
@@ -87,12 +92,16 @@ export const keymanagerOptions: ICliCommandOptions<KeymanagerArgs> = {
     defaultDescription: keymanagerRestApiServerOptsDefault.cors,
     group: "keymanager",
   },
+  "keymanager.bodyLimit": {
+    hidden: true,
+    type: "number",
+    description: "Defines the maximum payload, in bytes, the server is allowed to accept",
+  },
 };
 
 export const validatorOptions: ICliCommandOptions<IValidatorCliArgs> = {
   ...logOptions,
   ...keymanagerOptions,
-  logFile: beaconPathsOptions.logFile,
 
   keystoresDir: {
     hidden: true,
@@ -115,6 +124,13 @@ export const validatorOptions: ICliCommandOptions<IValidatorCliArgs> = {
     type: "string",
   },
 
+  proposerDir: {
+    hidden: true,
+    description: "Directory for storing keymanager's proposer configs for validators",
+    defaultDescription: defaultAccountPaths.proposerDir,
+    type: "string",
+  },
+
   validatorsDbDir: {
     hidden: true,
     description: "Data directory for validator databases.",
@@ -122,10 +138,15 @@ export const validatorOptions: ICliCommandOptions<IValidatorCliArgs> = {
     type: "string",
   },
 
-  server: {
-    description: "Address to connect to BeaconNode",
-    default: "http://127.0.0.1:9596",
-    type: "string",
+  beaconNodes: {
+    description: "Addresses to connect to BeaconNode",
+    default: ["http://127.0.0.1:9596"],
+    type: "array",
+    string: true,
+    coerce: (urls: string[]): string[] =>
+      // Parse ["url1,url2"] to ["url1", "url2"]
+      urls.map((item) => item.split(",")).flat(1),
+    alias: ["server"], // for backwards compatibility
   },
 
   force: {
@@ -141,14 +162,28 @@ export const validatorOptions: ICliCommandOptions<IValidatorCliArgs> = {
 
   afterBlockDelaySlotFraction: {
     hidden: true,
-    description: "Delay before publishing attestations if block comes early, as a fraction of SECONDS_PER_SLOT",
+    description:
+      "Delay before publishing attestations if block comes early, as a fraction of SECONDS_PER_SLOT (value is from 0 inclusive to 1 exclusive)",
     type: "number",
+  },
+
+  scAfterBlockDelaySlotFraction: {
+    hidden: true,
+    description:
+      "Delay before publishing SyncCommitteeSignature if block comes early, as a fraction of SECONDS_PER_SLOT (value is from 0 inclusive to 1 exclusive)",
+    type: "number",
+  },
+
+  proposerSettingsFile: {
+    description:
+      "A yaml file to specify detailed default and per validator pubkey customized proposer configs. PS: This feature and its format is in alpha and subject to change",
+    type: "string",
   },
 
   suggestedFeeRecipient: {
     description:
       "Specify fee recipient default for collecting the EL block fees and rewards (a hex string representing 20 bytes address: ^0x[a-fA-F0-9]{40}$). It would be possible (WIP) to override this per validator key using config or keymanager API. Only used post merge.",
-    defaultDescription: defaultOptions.defaultFeeRecipient,
+    defaultDescription: defaultOptions.suggestedFeeRecipient,
     type: "string",
   },
 

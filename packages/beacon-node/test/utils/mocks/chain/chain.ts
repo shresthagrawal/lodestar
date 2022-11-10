@@ -42,6 +42,7 @@ import {SeenBlockAttesters} from "../../../../src/chain/seenCache/seenBlockAttes
 import {BeaconProposerCache} from "../../../../src/chain/beaconProposerCache.js";
 import {CheckpointBalancesCache} from "../../../../src/chain/balancesCache.js";
 import {IChainOptions} from "../../../../src/chain/options.js";
+import {BlockAttributes} from "../../../../src/chain/produceBlock/produceBlockBody.js";
 
 /* eslint-disable @typescript-eslint/no-empty-function */
 
@@ -64,7 +65,7 @@ export class MockBeaconChain implements IBeaconChain {
     persistInvalidSszObjectsDir: "",
     proposerBoostEnabled: false,
     safeSlotsToImportOptimistically: 0,
-    defaultFeeRecipient: "0x0000000000000000000000000000000000000000",
+    suggestedFeeRecipient: "0x0000000000000000000000000000000000000000",
   };
   readonly anchorStateLatestBlockSlot: Slot;
 
@@ -97,7 +98,7 @@ export class MockBeaconChain implements IBeaconChain {
   readonly seenBlockAttesters = new SeenBlockAttesters();
 
   readonly beaconProposerCache = new BeaconProposerCache({
-    defaultFeeRecipient: defaultValidatorOptions.defaultFeeRecipient,
+    suggestedFeeRecipient: defaultValidatorOptions.suggestedFeeRecipient,
   });
   readonly checkpointBalancesCache = new CheckpointBalancesCache();
 
@@ -176,7 +177,13 @@ export class MockBeaconChain implements IBeaconChain {
     }));
   }
 
-  async receiveBlock(): Promise<void> {}
+  async produceBlock(_blockAttributes: BlockAttributes): Promise<allForks.BeaconBlock> {
+    throw Error("Not implemented");
+  }
+  async produceBlindedBlock(_blockAttributes: BlockAttributes): Promise<allForks.BlindedBeaconBlock> {
+    throw Error("Not implemented");
+  }
+
   async processBlock(): Promise<void> {}
   async processChainSegment(): Promise<void> {}
 
@@ -197,6 +204,10 @@ export class MockBeaconChain implements IBeaconChain {
     };
   }
 
+  recomputeForkChoiceHead(): ProtoBlock {
+    return this.forkChoice.getHead();
+  }
+
   async waitForBlockOfAttestation(): Promise<boolean> {
     return false;
   }
@@ -210,32 +221,38 @@ export class MockBeaconChain implements IBeaconChain {
   }
 
   async updateBeaconProposerData(): Promise<void> {}
+  updateBuilderStatus(): void {}
 }
+
+const root = ssz.Root.defaultValue() as Uint8Array;
+const rootHex = toHexString(root);
+export const zeroProtoBlock: ProtoBlock = {
+  slot: 0,
+  blockRoot: rootHex,
+  parentRoot: rootHex,
+  stateRoot: rootHex,
+  targetRoot: rootHex,
+
+  justifiedEpoch: 0,
+  justifiedRoot: rootHex,
+  finalizedEpoch: 0,
+  finalizedRoot: rootHex,
+  unrealizedJustifiedEpoch: 0,
+  unrealizedJustifiedRoot: rootHex,
+  unrealizedFinalizedEpoch: 0,
+  unrealizedFinalizedRoot: rootHex,
+
+  ...{executionPayloadBlockHash: null, executionStatus: ExecutionStatus.PreMerge},
+};
 
 function mockForkChoice(): IForkChoice {
   const root = ssz.Root.defaultValue() as Uint8Array;
   const rootHex = toHexString(root);
-  const block: ProtoBlock = {
-    slot: 0,
-    blockRoot: rootHex,
-    parentRoot: rootHex,
-    stateRoot: rootHex,
-    targetRoot: rootHex,
-
-    justifiedEpoch: 0,
-    justifiedRoot: rootHex,
-    finalizedEpoch: 0,
-    finalizedRoot: rootHex,
-    unrealizedJustifiedEpoch: 0,
-    unrealizedJustifiedRoot: rootHex,
-    unrealizedFinalizedEpoch: 0,
-    unrealizedFinalizedRoot: rootHex,
-
-    ...{executionPayloadBlockHash: null, executionStatus: ExecutionStatus.PreMerge},
-  };
+  const block: ProtoBlock = zeroProtoBlock;
   const checkpoint: CheckpointWithHex = {epoch: 0, root, rootHex};
 
   return {
+    irrecoverableError: undefined,
     getAncestor: () => rootHex,
     getHeadRoot: () => rootHex,
     getHead: () => block,
@@ -245,11 +262,13 @@ function mockForkChoice(): IForkChoice {
     getJustifiedCheckpoint: () => checkpoint,
     onBlock: () => {},
     onAttestation: () => {},
+    onAttesterSlashing: () => {},
     getLatestMessage: () => undefined,
     updateTime: () => {},
     getTime: () => 0,
     hasBlock: () => true,
     hasBlockHex: () => true,
+    getSlotsPresent: () => 0,
     getBlock: () => block,
     getBlockHex: () => block,
     getFinalizedBlock: () => block,
@@ -268,7 +287,7 @@ function mockForkChoice(): IForkChoice {
     getBlockSummariesAtSlot: () => [block],
     getCommonAncestorDistance: () => null,
     validateLatestHash: () => {},
-    findAttesterDependentRoot: () => block.blockRoot,
+    getDependentRoot: () => rootHex,
   };
 }
 
