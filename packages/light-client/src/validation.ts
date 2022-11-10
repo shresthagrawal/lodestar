@@ -34,13 +34,14 @@ export async function assertValidLightClientUpdate(
   //   throw Error("update slot is less or equal snapshot slot");
   // }
 
+  // Comment: The below check is commented out as Kevlar light client doesn't use the finalisedHeader
   // Verify update header root is the finalized root of the finality header, if specified
-  const isFinalized = !isEmptyHeader(update.finalizedHeader);
-  if (isFinalized) {
-    assertValidFinalityProof(update);
-  } else {
-    assertZeroHashes(update.finalityBranch, FINALIZED_ROOT_DEPTH, "finalityBranches");
-  }
+  // const isFinalized = !isEmptyHeader(update.finalizedHeader);
+  // if (isFinalized) {
+  //   assertValidFinalityProof(update);
+  // } else {
+  //   assertZeroHashes(update.finalityBranch, FINALIZED_ROOT_DEPTH, "finalityBranches");
+  // }
 
   // DIFF FROM SPEC:
   // The nextSyncCommitteeBranch should be check always not only when updatePeriodIncremented

@@ -2,7 +2,7 @@ import { ssz } from "@lodestar/types";
 import bls from "@chainsafe/bls/switchable";
 import { FINALIZED_ROOT_INDEX, FINALIZED_ROOT_DEPTH, NEXT_SYNC_COMMITTEE_INDEX, NEXT_SYNC_COMMITTEE_DEPTH, MIN_SYNC_COMMITTEE_PARTICIPANTS, DOMAIN_SYNC_COMMITTEE, } from "@lodestar/params";
 import { isValidMerkleBranch } from "./utils/verifyMerkleBranch.js";
-import { assertZeroHashes, getParticipantPubkeys, isEmptyHeader } from "./utils/utils.js";
+import { getParticipantPubkeys } from "./utils/utils.js";
 import { computeSyncPeriodAtSlot } from "./utils/clock.js";
 /**
  *
@@ -18,14 +18,14 @@ export async function assertValidLightClientUpdate(config, syncCommittee, update
     // if (update.header.slot <= snapshot.header.slot) {
     //   throw Error("update slot is less or equal snapshot slot");
     // }
+    // Comment: The below check is commented out as Kevlar light client doesn't use the finalisedHeader
     // Verify update header root is the finalized root of the finality header, if specified
-    const isFinalized = !isEmptyHeader(update.finalizedHeader);
-    if (isFinalized) {
-        assertValidFinalityProof(update);
-    }
-    else {
-        assertZeroHashes(update.finalityBranch, FINALIZED_ROOT_DEPTH, "finalityBranches");
-    }
+    // const isFinalized = !isEmptyHeader(update.finalizedHeader);
+    // if (isFinalized) {
+    //   assertValidFinalityProof(update);
+    // } else {
+    //   assertZeroHashes(update.finalityBranch, FINALIZED_ROOT_DEPTH, "finalityBranches");
+    // }
     // DIFF FROM SPEC:
     // The nextSyncCommitteeBranch should be check always not only when updatePeriodIncremented
     // An update may not increase the period but still be stored in validUpdates and be used latter
