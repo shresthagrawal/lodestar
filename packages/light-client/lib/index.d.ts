@@ -1,27 +1,23 @@
-import { Api } from "@lodestar/api";
-import { altair, phase0, RootHex, SyncPeriod } from "@lodestar/types";
-import { IBeaconConfig, IChainForkConfig } from "@lodestar/config";
-import { TreeOffsetProof } from "@chainsafe/persistent-merkle-tree";
-import { JsonPath } from "@chainsafe/ssz";
-import { LightclientUpdateStats } from "./utils/update.js";
-import { SyncCommitteeFast } from "./types.js";
+import { phase0, RootHex, SyncPeriod, allForks } from "@lodestar/types";
+import { BeaconConfig, ChainForkConfig } from "@lodestar/config";
 import { LightclientEmitter } from "./events.js";
 import { ILcLogger } from "./utils/logger.js";
+import { ProcessUpdateOpts } from "./spec/processLightClientUpdate.js";
+import { LightClientTransport } from "./transport/interface.js";
 export { LightclientEvent } from "./events.js";
 export { SyncCommitteeFast } from "./types.js";
-export declare type GenesisData = {
+export type GenesisData = {
     genesisTime: number;
     genesisValidatorsRoot: RootHex | Uint8Array;
 };
-export declare type LightclientInitArgs = {
-    config: IChainForkConfig;
+export type LightclientOpts = ProcessUpdateOpts;
+export type LightclientInitArgs = {
+    config: ChainForkConfig;
     logger?: ILcLogger;
+    opts?: LightclientOpts;
     genesisData: GenesisData;
-    beaconApiUrl: string;
-    snapshot: {
-        header: phase0.BeaconBlockHeader;
-        currentSyncCommittee: altair.SyncCommittee;
-    };
+    transport: LightClientTransport;
+    bootstrap: allForks.LightClientBootstrap;
 };
 /**
  * Server-based Lightclient. Current architecture diverges from the spec's proposed updated splitting them into:
@@ -41,7 +37,7 @@ export declare type LightclientInitArgs = {
  *   - For unknown test networks it can be queried from a trusted node at GET beacon/genesis
  * - `beaconApiUrl`: To connect to a trustless beacon node
  * - `LightclientStore`: To have an initial trusted SyncCommittee to start the sync
- *   - For new lightclient instances, it can be queries from a trustless node at GET lightclient/snapshot
+ *   - For new lightclient instances, it can be queries from a trustless node at GET lightclient/bootstrap
  *   - For existing lightclient instances, it should be retrieved from storage
  *
  * When to trigger a committee update sync:
@@ -53,53 +49,30 @@ export declare type LightclientInitArgs = {
  *               - known next_sync_committee, signed by current_sync_committee
  *
  * - No need to query for period 0 next_sync_committee until the end of period 0
- * - During most of period 0, current_sync_committe known, next_sync_committee unknown
- * - At the end of period 0, get a sync committe update, and populate period 1's committee
+ * - During most of period 0, current_sync_committee known, next_sync_committee unknown
+ * - At the end of period 0, get a sync committee update, and populate period 1's committee
  *
  * syncCommittees: Map<SyncPeriod, SyncCommittee>, limited to max of 2 items
  */
 export declare class Lightclient {
-    readonly api: Api;
     readonly emitter: LightclientEmitter;
-    readonly config: IBeaconConfig;
+    readonly config: BeaconConfig;
     readonly logger: ILcLogger;
     readonly genesisValidatorsRoot: Uint8Array;
     readonly genesisTime: number;
-    readonly beaconApiUrl: string;
-    /**
-     * Map of period -> SyncCommittee. Uses a Map instead of spec's current and next fields to allow more flexible sync
-     * strategies. In this case the Lightclient won't attempt to fetch the next SyncCommittee until the end of the
-     * current period. This Map approach is also flexible in case header updates arrive in mixed ordering.
-     */
-    readonly syncCommitteeByPeriod: Map<number, LightclientUpdateStats & SyncCommitteeFast>;
-    /**
-     * Register participation by period. Lightclient only accepts updates that have sufficient participation compared to
-     * previous updates with a factor of SAFETY_THRESHOLD_FACTOR.
-     */
-    private readonly maxParticipationByPeriod;
-    private head;
-    private finalized;
+    private readonly transport;
+    private readonly lightclientSpec;
     private status;
-    constructor({ config, logger, genesisData, beaconApiUrl, snapshot }: LightclientInitArgs);
+    constructor({ config, logger, genesisData, bootstrap, transport }: LightclientInitArgs);
     get currentSlot(): number;
-    static initializeFromCheckpointRoot({ config, logger, beaconApiUrl, genesisData, checkpointRoot, }: {
-        config: IChainForkConfig;
-        logger?: ILcLogger;
-        beaconApiUrl: string;
-        genesisData: GenesisData;
+    static initializeFromCheckpointRoot(args: Omit<LightclientInitArgs, "bootstrap"> & {
         checkpointRoot: phase0.Checkpoint["root"];
     }): Promise<Lightclient>;
     start(): void;
     stop(): void;
-    getHead(): phase0.BeaconBlockHeader;
-    /** Returns header since head may change during request */
-    getHeadStateProof(paths: JsonPath[]): Promise<{
-        proof: TreeOffsetProof;
-        header: phase0.BeaconBlockHeader;
-    }>;
+    getHead(): allForks.LightClientHeader;
     sync(fromPeriod: SyncPeriod, toPeriod: SyncPeriod): Promise<void>;
     private runLoop;
-    private onSSE;
     /**
      * Processes new optimistic header updates in only known synced sync periods.
      * This headerUpdate may update the head if there's enough participation.
@@ -110,16 +83,7 @@ export declare class Lightclient {
      * This headerUpdate may update the head if there's enough participation.
      */
     private processFinalizedUpdate;
-    /**
-     * Process SyncCommittee update, signed by a known previous SyncCommittee.
-     * SyncCommittee can be updated at any time, not strictly at the period borders.
-     *
-     *  period 0         period 1         period 2
-     * -|----------------|----------------|----------------|-> time
-     *                   | now
-     *                     - current_sync_committee: period 0
-     *                     - known next_sync_committee, signed by current_sync_committee
-     */
     private processSyncCommitteeUpdate;
+    private currentSlotWithTolerance;
 }
 //# sourceMappingURL=index.d.ts.map

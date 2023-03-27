@@ -1,5 +1,5 @@
-export declare type LogHandler = (message: string, context?: any, error?: Error) => void;
-export declare type ILcLogger = {
+export type LogHandler = (message: string, context?: any, error?: Error) => void;
+export type ILcLogger = {
     error: LogHandler;
     warn: LogHandler;
     info: LogHandler;

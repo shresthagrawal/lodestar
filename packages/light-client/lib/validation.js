@@ -10,7 +10,7 @@ import { computeSyncPeriodAtSlot } from "./utils/clock.js";
  * @param syncCommittee the sync committee update
  * @param update the light client update for validation
  */
-export async function assertValidLightClientUpdate(config, syncCommittee, update) {
+export function assertValidLightClientUpdate(config, syncCommittee, update) {
     // DIFF FROM SPEC: An update with the same header.slot can be valid and valuable to the lightclient
     // It may have more consensus and result in a better snapshot whilst not advancing the state
     // ----
@@ -31,8 +31,8 @@ export async function assertValidLightClientUpdate(config, syncCommittee, update
     // An update may not increase the period but still be stored in validUpdates and be used latter
     assertValidSyncCommitteeProof(update);
     const { attestedHeader } = update;
-    const headerBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(attestedHeader);
-    await assertValidSignedHeader(config, syncCommittee, update.syncAggregate, headerBlockRoot, attestedHeader.slot);
+    const headerBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(attestedHeader.beacon);
+    assertValidSignedHeader(config, syncCommittee, update.syncAggregate, headerBlockRoot, attestedHeader.beacon.slot);
 }
 /**
  * Proof that the state referenced in `update.finalityHeader.stateRoot` includes
@@ -47,11 +47,11 @@ export async function assertValidLightClientUpdate(config, syncCommittee, update
  * Where `hashTreeRoot(state) == update.finalityHeader.stateRoot`
  */
 export function assertValidFinalityProof(update) {
-    if (!isValidMerkleBranch(ssz.phase0.BeaconBlockHeader.hashTreeRoot(update.finalizedHeader), update.finalityBranch, FINALIZED_ROOT_DEPTH, FINALIZED_ROOT_INDEX, update.attestedHeader.stateRoot)) {
+    if (!isValidMerkleBranch(ssz.phase0.BeaconBlockHeader.hashTreeRoot(update.finalizedHeader.beacon), update.finalityBranch, FINALIZED_ROOT_DEPTH, FINALIZED_ROOT_INDEX, update.attestedHeader.beacon.stateRoot)) {
         throw Error("Invalid finality header merkle branch");
     }
-    const updatePeriod = computeSyncPeriodAtSlot(update.attestedHeader.slot);
-    const updateFinalityPeriod = computeSyncPeriodAtSlot(update.finalizedHeader.slot);
+    const updatePeriod = computeSyncPeriodAtSlot(update.attestedHeader.beacon.slot);
+    const updateFinalityPeriod = computeSyncPeriodAtSlot(update.finalizedHeader.beacon.slot);
     if (updateFinalityPeriod !== updatePeriod) {
         throw Error(`finalityHeader period ${updateFinalityPeriod} != header period ${updatePeriod}`);
     }
@@ -67,7 +67,7 @@ export function assertValidFinalityProof(update) {
  * Where `hashTreeRoot(state) == update.header.stateRoot`
  */
 export function assertValidSyncCommitteeProof(update) {
-    if (!isValidMerkleBranch(ssz.altair.SyncCommittee.hashTreeRoot(update.nextSyncCommittee), update.nextSyncCommitteeBranch, NEXT_SYNC_COMMITTEE_DEPTH, NEXT_SYNC_COMMITTEE_INDEX, update.attestedHeader.stateRoot)) {
+    if (!isValidMerkleBranch(ssz.altair.SyncCommittee.hashTreeRoot(update.nextSyncCommittee), update.nextSyncCommitteeBranch, NEXT_SYNC_COMMITTEE_DEPTH, NEXT_SYNC_COMMITTEE_INDEX, update.attestedHeader.beacon.stateRoot)) {
         throw Error("Invalid next sync committee merkle branch");
     }
 }

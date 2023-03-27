@@ -1,17 +1,17 @@
 import type { PublicKey } from "@chainsafe/bls/types";
-import { altair, phase0, SyncPeriod } from "@lodestar/types";
-export declare type LightClientStoreFast = {
+import { SyncPeriod, allForks } from "@lodestar/types";
+export type LightClientStoreFast = {
     snapshot: LightClientSnapshotFast;
-    bestUpdates: Map<SyncPeriod, altair.LightClientUpdate>;
+    bestUpdates: Map<SyncPeriod, allForks.LightClientUpdate>;
 };
-export declare type LightClientSnapshotFast = {
+export type LightClientSnapshotFast = {
     /** Beacon block header */
-    header: phase0.BeaconBlockHeader;
+    header: allForks.LightClientHeader;
     /** Sync committees corresponding to the header */
     currentSyncCommittee: SyncCommitteeFast;
     nextSyncCommittee: SyncCommitteeFast;
 };
-export declare type SyncCommitteeFast = {
+export type SyncCommitteeFast = {
     pubkeys: PublicKey[];
     aggregatePubkey: PublicKey;
 };

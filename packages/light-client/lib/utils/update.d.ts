@@ -1,5 +1,5 @@
 import { Slot } from "@lodestar/types";
-export declare type LightclientUpdateStats = {
+export type LightclientUpdateStats = {
     isFinalized: boolean;
     participation: number;
     slot: Slot;

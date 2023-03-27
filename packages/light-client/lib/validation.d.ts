@@ -1,5 +1,5 @@
-import { altair, Root, Slot } from "@lodestar/types";
-import { IBeaconConfig } from "@lodestar/config";
+import { altair, Root, Slot, allForks } from "@lodestar/types";
+import { BeaconConfig } from "@lodestar/config";
 import { SyncCommitteeFast } from "./types.js";
 /**
  *
@@ -7,7 +7,7 @@ import { SyncCommitteeFast } from "./types.js";
  * @param syncCommittee the sync committee update
  * @param update the light client update for validation
  */
-export declare function assertValidLightClientUpdate(config: IBeaconConfig, syncCommittee: SyncCommitteeFast, update: altair.LightClientUpdate): Promise<void>;
+export declare function assertValidLightClientUpdate(config: BeaconConfig, syncCommittee: SyncCommitteeFast, update: allForks.LightClientUpdate): void;
 /**
  * Proof that the state referenced in `update.finalityHeader.stateRoot` includes
  * ```ts
@@ -20,7 +20,7 @@ export declare function assertValidLightClientUpdate(config: IBeaconConfig, sync
  *
  * Where `hashTreeRoot(state) == update.finalityHeader.stateRoot`
  */
-export declare function assertValidFinalityProof(update: altair.LightClientFinalityUpdate): void;
+export declare function assertValidFinalityProof(update: allForks.LightClientFinalityUpdate): void;
 /**
  * Proof that the state referenced in `update.header.stateRoot` includes
  * ```ts
@@ -31,7 +31,7 @@ export declare function assertValidFinalityProof(update: altair.LightClientFinal
  *
  * Where `hashTreeRoot(state) == update.header.stateRoot`
  */
-export declare function assertValidSyncCommitteeProof(update: altair.LightClientUpdate): void;
+export declare function assertValidSyncCommitteeProof(update: allForks.LightClientUpdate): void;
 /**
  * Assert valid signature for `signedHeader` with provided `syncCommittee`.
  *
@@ -47,5 +47,5 @@ export declare function assertValidSyncCommitteeProof(update: altair.LightClient
  * @param forkVersion ForkVersion that was used to sign the update
  * @param signedHeaderRoot Takes header root instead of the head itself to prevent re-hashing on SSE
  */
-export declare function assertValidSignedHeader(config: IBeaconConfig, syncCommittee: SyncCommitteeFast, syncAggregate: altair.SyncAggregate, signedHeaderRoot: Root, signedHeaderSlot: Slot): Promise<void>;
+export declare function assertValidSignedHeader(config: BeaconConfig, syncCommittee: SyncCommitteeFast, syncAggregate: altair.SyncAggregate, signedHeaderRoot: Root, signedHeaderSlot: Slot): Promise<void>;
 //# sourceMappingURL=validation.d.ts.map

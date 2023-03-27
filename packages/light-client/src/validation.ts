@@ -124,7 +124,7 @@ export function assertValidSyncCommitteeProof(update: allForks.LightClientUpdate
  * @param forkVersion ForkVersion that was used to sign the update
  * @param signedHeaderRoot Takes header root instead of the head itself to prevent re-hashing on SSE
  */
-export function assertValidSignedHeader(
+export async function assertValidSignedHeader(
   config: BeaconConfig,
   syncCommittee: SyncCommitteeFast,
   syncAggregate: altair.SyncAggregate,

@@ -38,7 +38,7 @@ export function toBlockHeader(block) {
     };
 }
 function deserializePubkeys(pubkeys) {
-    return Array.from(pubkeys).map((pk) => bls.PublicKey.fromBytes(pk));
+    return pubkeys.map((pk) => bls.PublicKey.fromBytes(pk));
 }
 function serializePubkeys(pubkeys) {
     return pubkeys.map((pk) => pk.toBytes());

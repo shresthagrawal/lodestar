@@ -1,17 +1,6 @@
 export var LightclientEvent;
 (function (LightclientEvent) {
-    /**
-     * New head
-     */
-    LightclientEvent["head"] = "head";
-    /**
-     * New finalized
-     */
-    LightclientEvent["finalized"] = "finalized";
-    /**
-     * Stored nextSyncCommittee from an update at period `period`.
-     * Note: the SyncCommittee is stored for `period + 1`.
-     */
-    LightclientEvent["committee"] = "committee";
+    LightclientEvent["lightClientOptimisticUpdate"] = "light_client_optimistic_update";
+    LightclientEvent["lightClientFinalityUpdate"] = "light_client_finality_update";
 })(LightclientEvent || (LightclientEvent = {}));
 //# sourceMappingURL=events.js.map

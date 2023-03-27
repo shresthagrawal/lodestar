@@ -27,13 +27,13 @@ export function computeSyncPeriodAtEpoch(epoch) {
     return Math.floor(epoch / EPOCHS_PER_SYNC_COMMITTEE_PERIOD);
 }
 export function timeUntilNextEpoch(config, genesisTime) {
-    const miliSecondsPerEpoch = SLOTS_PER_EPOCH * config.SECONDS_PER_SLOT * 1000;
+    const milliSecondsPerEpoch = SLOTS_PER_EPOCH * config.SECONDS_PER_SLOT * 1000;
     const msFromGenesis = Date.now() - genesisTime * 1000;
     if (msFromGenesis >= 0) {
-        return miliSecondsPerEpoch - (msFromGenesis % miliSecondsPerEpoch);
+        return milliSecondsPerEpoch - (msFromGenesis % milliSecondsPerEpoch);
     }
     else {
-        return Math.abs(msFromGenesis % miliSecondsPerEpoch);
+        return Math.abs(msFromGenesis % milliSecondsPerEpoch);
     }
 }
 //# sourceMappingURL=clock.js.map
