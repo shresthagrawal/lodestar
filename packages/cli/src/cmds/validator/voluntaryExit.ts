@@ -6,13 +6,13 @@ import {
   getCurrentSlot,
 } from "@lodestar/state-transition";
 import {DOMAIN_VOLUNTARY_EXIT} from "@lodestar/params";
-import {createIBeaconConfig} from "@lodestar/config";
+import {createBeaconConfig} from "@lodestar/config";
 import {ssz, phase0} from "@lodestar/types";
 import {toHex} from "@lodestar/utils";
 import {Signer, SignerLocal, SignerType} from "@lodestar/validator";
-import {Api, getClient} from "@lodestar/api";
-import {ensure0xPrefix, ICliCommand, YargsError} from "../../util/index.js";
-import {IGlobalArgs} from "../../options/index.js";
+import {Api, ApiError, getClient} from "@lodestar/api";
+import {ensure0xPrefix, CliCommand, YargsError} from "../../util/index.js";
+import {GlobalArgs} from "../../options/index.js";
 import {getBeaconConfigFromArgs} from "../../config/index.js";
 import {IValidatorCliArgs} from "./options.js";
 import {getSignersFromArgs} from "./signers/index.js";
@@ -25,17 +25,16 @@ type VoluntaryExitArgs = {
   yes?: boolean;
 };
 
-export const voluntaryExit: ICliCommand<VoluntaryExitArgs, IValidatorCliArgs & IGlobalArgs> = {
+export const voluntaryExit: CliCommand<VoluntaryExitArgs, IValidatorCliArgs & GlobalArgs> = {
   command: "voluntary-exit",
 
   describe:
-    "Performs a voluntary exit for a given validator (as identified via `publicKey`.  \
-If no `publicKey` is provided, a prompt will ask the user which validator they would \
-like to choose for the voluntary exit.",
+    "Performs a voluntary exit for a given set of validators as identified via `pubkeys`. \
+If no `pubkeys` are provided, it will exit all validators that have been imported.",
 
   examples: [
     {
-      command: "account validator voluntary-exit --publicKey 0xF00",
+      command: "validator voluntary-exit --pubkeys 0xF00",
       description: "Perform a voluntary exit for the validator who has a public key 0xF00",
     },
   ],
@@ -48,7 +47,8 @@ like to choose for the voluntary exit.",
     },
 
     pubkeys: {
-      description: "Pubkeys to exit, must be available as local signers",
+      description:
+        "Pubkeys to exit, must be available as local signers. Multiple keys have to be provided as comma-separated values.",
       type: "array",
       string: true, // Ensures the pubkey string is not automatically converted to numbers
       coerce: (pubkeys: string[]): string[] =>
@@ -70,14 +70,16 @@ like to choose for the voluntary exit.",
     // Do not use known networks cache, it defaults to mainnet for devnets
     const {config: chainForkConfig, network} = getBeaconConfigFromArgs(args);
     const client = getClient({urls: args.beaconNodes}, {config: chainForkConfig});
-    const {genesisValidatorsRoot, genesisTime} = (await client.beacon.getGenesis()).data;
-    const config = createIBeaconConfig(chainForkConfig, genesisValidatorsRoot);
+    const genesisRes = await client.beacon.getGenesis();
+    ApiError.assert(genesisRes, "Unable to fetch genesisValidatorsRoot from beacon node");
+    const {genesisValidatorsRoot, genesisTime} = genesisRes.response.data;
+    const config = createBeaconConfig(chainForkConfig, genesisValidatorsRoot);
 
     // Set exitEpoch to current epoch if unspecified
     const exitEpoch = args.exitEpoch ?? computeEpochAtSlot(getCurrentSlot(config, genesisTime));
 
     // Select signers to exit
-    const signers = await getSignersFromArgs(args, network);
+    const signers = await getSignersFromArgs(args, network, {logger: console, signal: new AbortController().signal});
     const signersToExit = selectSignersToExit(args, signers);
     const validatorsToExit = await resolveValidatorIndexes(client, signersToExit);
 
@@ -100,10 +102,12 @@ ${validatorsToExit.map((v) => `${v.pubkey} ${v.index} ${v.status}`).join("\n")}`
       const voluntaryExit: phase0.VoluntaryExit = {epoch: exitEpoch, validatorIndex: index};
       const signingRoot = computeSigningRoot(ssz.phase0.VoluntaryExit, voluntaryExit, domain);
 
-      await client.beacon.submitPoolVoluntaryExit({
-        message: voluntaryExit,
-        signature: signer.secretKey.sign(signingRoot).toBytes(),
-      });
+      ApiError.assert(
+        await client.beacon.submitPoolVoluntaryExit({
+          message: voluntaryExit,
+          signature: signer.secretKey.sign(signingRoot).toBytes(),
+        })
+      );
 
       console.log(`Submitted voluntary exit for ${pubkey} ${i + 1}/${signersToExit.length}`);
     }
@@ -143,9 +147,10 @@ function selectSignersToExit(args: VoluntaryExitArgs, signers: Signer[]): Signer
 async function resolveValidatorIndexes(client: Api, signersToExit: SignerLocalPubkey[]) {
   const pubkeys = signersToExit.map(({pubkey}) => pubkey);
 
-  const {data} = await client.beacon.getStateValidators("head", {id: pubkeys});
+  const res = await client.beacon.getStateValidators("head", {id: pubkeys});
+  ApiError.assert(res, "Can not fetch state validators from beacon node");
 
-  const dataByPubkey = new Map(data.map((item) => [toHex(item.validator.pubkey), item]));
+  const dataByPubkey = new Map(res.response.data.map((item) => [toHex(item.validator.pubkey), item]));
 
   return signersToExit.map(({signer, pubkey}) => {
     const item = dataByPubkey.get(pubkey);

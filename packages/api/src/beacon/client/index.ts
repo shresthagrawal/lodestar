@@ -1,4 +1,4 @@
-import {IChainForkConfig} from "@lodestar/config";
+import {ChainForkConfig} from "@lodestar/config";
 import {Api} from "../routes/index.js";
 import {IHttpClient, HttpClient, HttpClientOptions, HttpClientModules} from "../../utils/client/index.js";
 
@@ -9,10 +9,11 @@ import * as events from "./events.js";
 import * as lightclient from "./lightclient.js";
 import * as lodestar from "./lodestar.js";
 import * as node from "./node.js";
+import * as proof from "./proof.js";
 import * as validator from "./validator.js";
 
 type ClientModules = HttpClientModules & {
-  config: IChainForkConfig;
+  config: ChainForkConfig;
   httpClient?: IHttpClient;
 };
 
@@ -31,6 +32,7 @@ export function getClient(opts: HttpClientOptions, modules: ClientModules): Api 
     lightclient: lightclient.getClient(config, httpClient),
     lodestar: lodestar.getClient(config, httpClient),
     node: node.getClient(config, httpClient),
+    proof: proof.getClient(config, httpClient),
     validator: validator.getClient(config, httpClient),
   };
 }

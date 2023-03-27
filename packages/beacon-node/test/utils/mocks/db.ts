@@ -14,6 +14,9 @@ import {
   SyncCommitteeRepository,
   SyncCommitteeWitnessRepository,
   BackfilledRanges,
+  BlobsSidecarRepository,
+  BlobsSidecarArchiveRepository,
+  BLSToExecutionChangeRepository,
 } from "../../../src/db/repositories/index.js";
 import {PreGenesisState, PreGenesisStateLastProcessedBlock} from "../../../src/db/single/index.js";
 import {createStubInstance} from "../types.js";
@@ -27,9 +30,11 @@ export function getStubbedBeaconDb(): IBeaconDb {
   return {
     // unfinalized blocks
     block: createStubInstance(BlockRepository),
+    blobsSidecar: createStubInstance(BlobsSidecarRepository),
 
     // finalized blocks
     blockArchive: createStubInstance(BlockArchiveRepository),
+    blobsSidecarArchive: createStubInstance(BlobsSidecarArchiveRepository),
 
     // finalized states
     stateArchive: createStubInstance(StateArchiveRepository),
@@ -39,6 +44,7 @@ export function getStubbedBeaconDb(): IBeaconDb {
     proposerSlashing: createStubInstance(ProposerSlashingRepository),
     attesterSlashing: createStubInstance(AttesterSlashingRepository),
     depositEvent: createStubInstance(DepositEventRepository),
+    blsToExecutionChange: createStubInstance(BLSToExecutionChangeRepository),
 
     // eth1 processing
     preGenesisState: createStubInstance(PreGenesisState),
@@ -62,5 +68,6 @@ export function getStubbedBeaconDb(): IBeaconDb {
     async stop(): Promise<void> {},
     /** To inject metrics after CLI initialization */
     setMetrics(): void {},
+    async pruneHotDb(): Promise<void> {},
   };
 }

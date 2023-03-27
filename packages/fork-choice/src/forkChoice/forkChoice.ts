@@ -20,7 +20,7 @@ import {
   getAttesterSlashableIndices,
 } from "@lodestar/state-transition";
 import {computeUnrealizedCheckpoints} from "@lodestar/state-transition/epoch";
-import {IChainConfig, IChainForkConfig} from "@lodestar/config";
+import {ChainConfig, ChainForkConfig} from "@lodestar/config";
 
 import {computeDeltas} from "../protoArray/computeDeltas.js";
 import {
@@ -30,15 +30,22 @@ import {
   ExecutionStatus,
   MaybeValidExecutionStatus,
   LVHExecResponse,
+  ProtoNode,
 } from "../protoArray/interface.js";
 import {ProtoArray} from "../protoArray/protoArray.js";
 import {ProtoArrayError, ProtoArrayErrorCode} from "../protoArray/errors.js";
 
 import {ForkChoiceError, ForkChoiceErrorCode, InvalidBlockCode, InvalidAttestationCode} from "./errors.js";
-import {IForkChoice, LatestMessage, QueuedAttestation, PowBlockHex, EpochDifference} from "./interface.js";
+import {
+  IForkChoice,
+  LatestMessage,
+  QueuedAttestation,
+  PowBlockHex,
+  EpochDifference,
+  AncestorResult,
+  AncestorStatus,
+} from "./interface.js";
 import {IForkChoiceStore, CheckpointWithHex, toCheckpointWithHex, JustifiedBalances} from "./store.js";
-
-/* eslint-disable max-len */
 
 export type ForkChoiceOpts = {
   proposerBoostEnabled?: boolean;
@@ -80,7 +87,7 @@ export class ForkChoice implements IForkChoice {
 
   // Note: as of Jun 2022 Lodestar metrics show that 100% of the times updateHead() is called, synced = false.
   // Because we are processing attestations from gossip, recomputing scores is always necessary
-  // /** Avoid having to compute detas all the times. */
+  // /** Avoid having to compute deltas all the times. */
   // private synced = false;
 
   /** Cached head */
@@ -93,19 +100,22 @@ export class ForkChoice implements IForkChoice {
   private proposerBoostRoot: RootHex | null = null;
   /** Score to use in proposer boost, evaluated lazily from justified balances */
   private justifiedProposerBoostScore: number | null = null;
+  /** The current effective balances */
+  private balances: EffectiveBalanceIncrements;
   /**
    * Instantiates a Fork Choice from some existing components
    *
    * This is useful if the existing components have been loaded from disk after a process restart.
    */
   constructor(
-    private readonly config: IChainForkConfig,
+    private readonly config: ChainForkConfig,
     private readonly fcStore: IForkChoiceStore,
     /** The underlying representation of the block DAG. */
     private readonly protoArray: ProtoArray,
     private readonly opts?: ForkChoiceOpts
   ) {
     this.head = this.updateHead();
+    this.balances = this.fcStore.justified.balances;
   }
 
   /**
@@ -191,17 +201,18 @@ export class ForkChoice implements IForkChoice {
     // No need to cache the head anymore
 
     // Check if scores need to be calculated/updated
-    // eslint-disable-next-line prefer-const
-    const justifiedBalances = this.fcStore.justified.balances;
+    const oldBalances = this.balances;
+    const newBalances = this.fcStore.justified.balances;
     const deltas = computeDeltas(
       this.protoArray.indices,
       this.votes,
-      justifiedBalances,
-      justifiedBalances,
+      oldBalances,
+      newBalances,
       this.fcStore.equivocatingIndices
     );
+    this.balances = newBalances;
     /**
-     * The structure in line with deltas to propogate boost up the branch
+     * The structure in line with deltas to propagate boost up the branch
      * starting from the proposerIndex
      */
     let proposerBoost: {root: RootHex; score: number} | null = null;
@@ -247,7 +258,7 @@ export class ForkChoice implements IForkChoice {
   }
 
   /**
-   * An iteration over protoArray to get present slots, to be called pre-emptively
+   * An iteration over protoArray to get present slots, to be called preemptively
    * from prepareNextSlot to prevent delay on produceBlindedBlock
    * @param windowStart is the slot after which (excluding) to provide present slots
    */
@@ -258,6 +269,11 @@ export class ForkChoice implements IForkChoice {
   /** Very expensive function, iterates the entire ProtoArray. Called only in debug API */
   getHeads(): ProtoBlock[] {
     return this.protoArray.nodes.filter((node) => node.bestChild === undefined);
+  }
+
+  /** This is for the debug API only */
+  getAllNodes(): ProtoNode[] {
+    return this.protoArray.nodes;
   }
 
   getFinalizedCheckpoint(): CheckpointWithHex {
@@ -297,7 +313,7 @@ export class ForkChoice implements IForkChoice {
     blockDelaySec: number,
     currentSlot: Slot,
     executionStatus: MaybeValidExecutionStatus
-  ): void {
+  ): ProtoBlock {
     const {parentRoot, slot} = block;
     const parentRootHex = toHexString(parentRoot);
     // Parent block must be known
@@ -454,34 +470,36 @@ export class ForkChoice implements IForkChoice {
 
     const targetSlot = computeStartSlotAtEpoch(blockEpoch);
     const targetRoot = slot === targetSlot ? blockRoot : state.blockRoots.get(targetSlot % SLOTS_PER_HISTORICAL_ROOT);
+
     // This does not apply a vote to the block, it just makes fork choice aware of the block so
     // it can still be identified as the head even if it doesn't have any votes.
-    this.protoArray.onBlock(
-      {
-        slot: slot,
-        blockRoot: blockRootHex,
-        parentRoot: parentRootHex,
-        targetRoot: toHexString(targetRoot),
-        stateRoot: toHexString(block.stateRoot),
+    const protoBlock: ProtoBlock = {
+      slot: slot,
+      blockRoot: blockRootHex,
+      parentRoot: parentRootHex,
+      targetRoot: toHexString(targetRoot),
+      stateRoot: toHexString(block.stateRoot),
 
-        justifiedEpoch: stateJustifiedEpoch,
-        justifiedRoot: toHexString(state.currentJustifiedCheckpoint.root),
-        finalizedEpoch: finalizedCheckpoint.epoch,
-        finalizedRoot: toHexString(state.finalizedCheckpoint.root),
-        unrealizedJustifiedEpoch: unrealizedJustifiedCheckpoint.epoch,
-        unrealizedJustifiedRoot: unrealizedJustifiedCheckpoint.rootHex,
-        unrealizedFinalizedEpoch: unrealizedFinalizedCheckpoint.epoch,
-        unrealizedFinalizedRoot: unrealizedFinalizedCheckpoint.rootHex,
+      justifiedEpoch: stateJustifiedEpoch,
+      justifiedRoot: toHexString(state.currentJustifiedCheckpoint.root),
+      finalizedEpoch: finalizedCheckpoint.epoch,
+      finalizedRoot: toHexString(state.finalizedCheckpoint.root),
+      unrealizedJustifiedEpoch: unrealizedJustifiedCheckpoint.epoch,
+      unrealizedJustifiedRoot: unrealizedJustifiedCheckpoint.rootHex,
+      unrealizedFinalizedEpoch: unrealizedFinalizedCheckpoint.epoch,
+      unrealizedFinalizedRoot: unrealizedFinalizedCheckpoint.rootHex,
 
-        ...(isExecutionBlockBodyType(block.body) && isExecutionStateType(state) && isExecutionEnabled(state, block)
-          ? {
-              executionPayloadBlockHash: toHexString(block.body.executionPayload.blockHash),
-              executionStatus: this.getPostMergeExecStatus(executionStatus),
-            }
-          : {executionPayloadBlockHash: null, executionStatus: this.getPreMergeExecStatus(executionStatus)}),
-      },
-      currentSlot
-    );
+      ...(isExecutionBlockBodyType(block.body) && isExecutionStateType(state) && isExecutionEnabled(state, block)
+        ? {
+            executionPayloadBlockHash: toHexString(block.body.executionPayload.blockHash),
+            executionStatus: this.getPostMergeExecStatus(executionStatus),
+          }
+        : {executionPayloadBlockHash: null, executionStatus: this.getPreMergeExecStatus(executionStatus)}),
+    };
+
+    this.protoArray.onBlock(protoBlock, currentSlot);
+
+    return protoBlock;
   }
 
   /**
@@ -502,7 +520,7 @@ export class ForkChoice implements IForkChoice {
    * The supplied `attestation` **must** pass the `in_valid_indexed_attestation` function as it
    * will not be run here.
    */
-  onAttestation(attestation: phase0.IndexedAttestation, attDataRoot?: string): void {
+  onAttestation(attestation: phase0.IndexedAttestation, attDataRoot?: string, forceImport?: boolean): void {
     // Ignore any attestations to the zero hash.
     //
     // This is an edge case that results from the spec aliasing the zero hash to the genesis
@@ -524,7 +542,7 @@ export class ForkChoice implements IForkChoice {
       return;
     }
 
-    this.validateOnAttestation(attestation, slot, blockRootHex, targetEpoch, attDataRoot);
+    this.validateOnAttestation(attestation, slot, blockRootHex, targetEpoch, attDataRoot, forceImport);
 
     if (slot < this.fcStore.currentSlot) {
       for (const validatorIndex of attestation.attestingIndices) {
@@ -755,27 +773,30 @@ export class ForkChoice implements IForkChoice {
     return blocksAtSlot;
   }
 
-  /** Returns the distance of common ancestor of nodes to newNode. Returns null if newNode is descendant of prevNode */
-  getCommonAncestorDistance(prevBlock: ProtoBlock, newBlock: ProtoBlock): number | null {
+  /** Returns the distance of common ancestor of nodes to the max of the newNode and the prevNode. */
+  getCommonAncestorDepth(prevBlock: ProtoBlock, newBlock: ProtoBlock): AncestorResult {
     const prevNode = this.protoArray.getNode(prevBlock.blockRoot);
     const newNode = this.protoArray.getNode(newBlock.blockRoot);
-    if (!prevNode) throw Error(`No node if forkChoice for blockRoot ${prevBlock.blockRoot}`);
-    if (!newNode) throw Error(`No node if forkChoice for blockRoot ${newBlock.blockRoot}`);
+    if (!prevNode || !newNode) {
+      return {code: AncestorStatus.BlockUnknown};
+    }
 
     const commonAncestor = this.protoArray.getCommonAncestor(prevNode, newNode);
     // No common ancestor, should never happen. Return null to not throw
-    if (!commonAncestor) return null;
+    if (!commonAncestor) {
+      return {code: AncestorStatus.NoCommonAncenstor};
+    }
 
     // If common node is one of both nodes, then they are direct descendants, return null
     if (commonAncestor.blockRoot === prevNode.blockRoot || commonAncestor.blockRoot === newNode.blockRoot) {
-      return null;
+      return {code: AncestorStatus.Descendant};
     }
 
-    return newNode.slot - commonAncestor.slot;
+    return {code: AncestorStatus.CommonAncestor, depth: Math.max(newNode.slot, prevNode.slot) - commonAncestor.slot};
   }
 
   /**
-   * Optimistic sync validate till validated latest hash, invalidate any decendant
+   * Optimistic sync validate till validated latest hash, invalidate any descendant
    * branch if invalidate till hash provided
    *
    * Proxies to protoArray's validateLatestHash and could run extra validations for the
@@ -824,8 +845,8 @@ export class ForkChoice implements IForkChoice {
       return genesisBlock.blockRoot;
     }
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
+    const finalizedSlot = this.getFinalizedBlock().slot;
+    while (block.slot >= finalizedSlot) {
       // Dependant root must be in epoch less than `beforeSlot`
       if (block.slot < beforeSlot) {
         return block.blockRoot;
@@ -843,6 +864,8 @@ export class ForkChoice implements IForkChoice {
           : // else we can navigate much faster jumping to the target block
             this.protoArray.getBlockReadonly(block.targetRoot);
     }
+
+    throw Error(`Not found dependent root for block slot ${block.slot}, epoch difference ${epochDifference}`);
   }
 
   private getPreMergeExecStatus(executionStatus: MaybeValidExecutionStatus): ExecutionStatus.PreMerge {
@@ -930,7 +953,7 @@ export class ForkChoice implements IForkChoice {
    * May need the justified balances of:
    * - bestJustified: Already available in `CheckpointHexWithBalance`
    * - unrealizedJustified: Already available in `CheckpointHexWithBalance`
-   * Since this balances are already available the getter is just `() => balances`, without cache iteraction
+   * Since this balances are already available the getter is just `() => balances`, without cache interaction
    */
   private updateCheckpoints(
     stateSlot: Slot,
@@ -972,7 +995,9 @@ export class ForkChoice implements IForkChoice {
     slot: Slot,
     blockRootHex: string,
     targetEpoch: Epoch,
-    attDataRoot?: string
+    attDataRoot?: string,
+    // forceImport attestation even if too old, mostly used in spec tests
+    forceImport?: boolean
   ): void {
     // There is no point in processing an attestation with an empty bitfield. Reject
     // it immediately.
@@ -993,7 +1018,14 @@ export class ForkChoice implements IForkChoice {
     const attestationCacheKey = attDataRoot ?? toHexString(ssz.phase0.AttestationData.hashTreeRoot(attestationData));
 
     if (!this.validatedAttestationDatas.has(attestationCacheKey)) {
-      this.validateAttestationData(indexedAttestation.data, slot, blockRootHex, targetEpoch, attestationCacheKey);
+      this.validateAttestationData(
+        indexedAttestation.data,
+        slot,
+        blockRootHex,
+        targetEpoch,
+        attestationCacheKey,
+        forceImport
+      );
     }
   }
 
@@ -1002,7 +1034,9 @@ export class ForkChoice implements IForkChoice {
     slot: Slot,
     beaconBlockRootHex: string,
     targetEpoch: Epoch,
-    attestationCacheKey: string
+    attestationCacheKey: string,
+    // forceImport attestation even if too old, mostly used in spec tests
+    forceImport?: boolean
   ): void {
     const epochNow = computeEpochAtSlot(this.fcStore.currentSlot);
     const targetRootHex = toHexString(attestationData.target.root);
@@ -1017,7 +1051,7 @@ export class ForkChoice implements IForkChoice {
           currentEpoch: epochNow,
         },
       });
-    } else if (targetEpoch + 1 < epochNow) {
+    } else if (!forceImport && targetEpoch + 1 < epochNow) {
       throw new ForkChoiceError({
         code: ForkChoiceErrorCode.INVALID_ATTESTATION,
         err: {
@@ -1209,7 +1243,7 @@ export class ForkChoice implements IForkChoice {
  * imported merge block.
  */
 export function assertValidTerminalPowBlock(
-  config: IChainConfig,
+  config: ChainConfig,
   block: bellatrix.BeaconBlock,
   preCachedData: {
     executionStatus: ExecutionStatus.Syncing | ExecutionStatus.Valid;
@@ -1237,14 +1271,24 @@ export function assertValidTerminalPowBlock(
 
     const {powBlock, powBlockParent} = preCachedData;
     if (!powBlock) throw Error("onBlock preCachedData must include powBlock");
-    if (!powBlockParent) throw Error("onBlock preCachedData must include powBlockParent");
+    // if powBlock is genesis don't assert powBlockParent
+    if (!powBlockParent && powBlock.parentHash !== HEX_ZERO_HASH)
+      throw Error("onBlock preCachedData must include powBlockParent");
 
     const isTotalDifficultyReached = powBlock.totalDifficulty >= config.TERMINAL_TOTAL_DIFFICULTY;
-    const isParentTotalDifficultyValid = powBlockParent.totalDifficulty < config.TERMINAL_TOTAL_DIFFICULTY;
-    if (!isTotalDifficultyReached || !isParentTotalDifficultyValid)
+    // If we don't have powBlockParent here, powBlock is the genesis and as we would have errored above
+    // we can mark isParentTotalDifficultyValid as valid
+    const isParentTotalDifficultyValid =
+      !powBlockParent || powBlockParent.totalDifficulty < config.TERMINAL_TOTAL_DIFFICULTY;
+    if (!isTotalDifficultyReached) {
       throw Error(
-        `Invalid terminal POW block: total difficulty not reached ${powBlockParent.totalDifficulty} < ${powBlock.totalDifficulty}`
+        `Invalid terminal POW block: total difficulty not reached expected >= ${config.TERMINAL_TOTAL_DIFFICULTY}, actual = ${powBlock.totalDifficulty}`
       );
+    } else if (!isParentTotalDifficultyValid) {
+      throw Error(
+        `Invalid terminal POW block parent: expected < ${config.TERMINAL_TOTAL_DIFFICULTY}, actual = ${powBlockParent.totalDifficulty}`
+      );
+    }
   }
 }
 

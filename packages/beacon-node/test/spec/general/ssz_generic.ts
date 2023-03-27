@@ -6,8 +6,6 @@ import {parseSszGenericInvalidTestcase, parseSszGenericValidTestcase} from "../u
 import {runValidSszTest} from "../utils/runValidSszTest.js";
 import {getTestType} from "./ssz_generic_types.js";
 
-/* eslint-disable @typescript-eslint/naming-convention */
-
 // Mapping of sszGeneric() fn arguments to the path in spec tests
 //
 //       / config  / fork   / test runner      / test handler / test suite   / test case
@@ -15,7 +13,12 @@ import {getTestType} from "./ssz_generic_types.js";
 // tests / general / phase0 / ssz_generic      / basic_vector / valid        / vec_bool_1_max/meta.yaml
 //
 
-export const sszGeneric: TestRunnerCustom = (fork, typeName, testSuite, testSuiteDirpath) => {
+export const sszGeneric = (skippedTypes: string[]): TestRunnerCustom => (
+  fork,
+  typeName,
+  testSuite,
+  testSuiteDirpath
+) => {
   if (testSuite === "invalid") {
     for (const testCase of fs.readdirSync(testSuiteDirpath)) {
       it(testCase, () => {
@@ -42,10 +45,8 @@ export const sszGeneric: TestRunnerCustom = (fork, typeName, testSuite, testSuit
     }
   } else if (testSuite === "valid") {
     for (const testCase of fs.readdirSync(testSuiteDirpath)) {
-      // NOTE: ComplexTestStruct tests are not correctly generated.
-      // where deserialized .d value is D: '0x00'. However the tests guide mark that field as D: Bytes[256].
-      // Those test won't be fixed since most implementations staticly compile types.
-      if (testCase.startsWith("ComplexTestStruct")) {
+      // Do not manually skip tests here, do it in packages/beacon-node/test/spec/general/index.test.ts
+      if (skippedTypes.some((skippedType) => testCase.startsWith(skippedType))) {
         continue;
       }
 

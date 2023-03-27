@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {ForkName, ForkSeq} from "@lodestar/params";
-import {IBeaconConfig, IForkInfo} from "@lodestar/config";
+import {BeaconConfig, ForkInfo} from "@lodestar/config";
 import {getCurrentAndNextFork, getActiveForks} from "../../../src/network/forks.js";
 
 function getForkConfig({
@@ -8,13 +8,15 @@ function getForkConfig({
   altair,
   bellatrix,
   capella,
+  deneb,
 }: {
   phase0: number;
   altair: number;
   bellatrix: number;
   capella: number;
-}): IBeaconConfig {
-  const forks: Record<ForkName, IForkInfo> = {
+  deneb: number;
+}): BeaconConfig {
+  const forks: Record<ForkName, ForkInfo> = {
     phase0: {
       name: ForkName.phase0,
       seq: ForkSeq.phase0,
@@ -47,10 +49,18 @@ function getForkConfig({
       prevVersion: Buffer.from([0, 0, 0, 2]),
       prevForkName: ForkName.bellatrix,
     },
+    deneb: {
+      name: ForkName.deneb,
+      seq: ForkSeq.deneb,
+      epoch: deneb,
+      version: Buffer.from([0, 0, 0, 4]),
+      prevVersion: Buffer.from([0, 0, 0, 3]),
+      prevForkName: ForkName.capella,
+    },
   };
   const forksAscendingEpochOrder = Object.values(forks);
   const forksDescendingEpochOrder = Object.values(forks).reverse();
-  return {forks, forksAscendingEpochOrder, forksDescendingEpochOrder} as IBeaconConfig;
+  return {forks, forksAscendingEpochOrder, forksDescendingEpochOrder} as BeaconConfig;
 }
 
 const testScenarios = [
@@ -122,9 +132,11 @@ const testScenarios = [
 
 for (const testScenario of testScenarios) {
   const {phase0, altair, bellatrix, capella, testCases} = testScenario;
+  // TODO DENEB: Is it necessary to test?
+  const deneb = Infinity;
 
   describe(`network / fork: phase0: ${phase0}, altair: ${altair}, bellatrix: ${bellatrix} capella: ${capella}`, () => {
-    const forkConfig = getForkConfig({phase0, altair, bellatrix, capella});
+    const forkConfig = getForkConfig({phase0, altair, bellatrix, capella, deneb});
     const forks = forkConfig.forks;
     for (const testCase of testCases) {
       const {epoch, currentFork, nextFork, activeForks} = testCase;

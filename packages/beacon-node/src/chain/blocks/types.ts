@@ -1,12 +1,59 @@
-import {CachedBeaconStateAllForks} from "@lodestar/state-transition";
+import {CachedBeaconStateAllForks, computeEpochAtSlot} from "@lodestar/state-transition";
 import {MaybeValidExecutionStatus} from "@lodestar/fork-choice";
-import {allForks, Slot} from "@lodestar/types";
+import {allForks, deneb, Slot} from "@lodestar/types";
+import {ForkSeq} from "@lodestar/params";
+import {ChainForkConfig} from "@lodestar/config";
+
+export enum BlockInputType {
+  preDeneb = "preDeneb",
+  postDeneb = "postDeneb",
+}
+
+export type BlockInput =
+  | {type: BlockInputType.preDeneb; block: allForks.SignedBeaconBlock}
+  | {type: BlockInputType.postDeneb; block: allForks.SignedBeaconBlock; blobs: deneb.BlobsSidecar};
+
+export function blockRequiresBlobs(config: ChainForkConfig, blockSlot: Slot, clockSlot: Slot): boolean {
+  return (
+    config.getForkSeq(blockSlot) >= ForkSeq.deneb &&
+    // Only request blobs if they are recent enough
+    computeEpochAtSlot(blockSlot) >= computeEpochAtSlot(clockSlot) - config.MIN_EPOCHS_FOR_BLOBS_SIDECARS_REQUESTS
+  );
+}
+
+export const getBlockInput = {
+  preDeneb(config: ChainForkConfig, block: allForks.SignedBeaconBlock): BlockInput {
+    if (config.getForkSeq(block.message.slot) >= ForkSeq.deneb) {
+      throw Error(`Post Deneb block slot ${block.message.slot}`);
+    }
+    return {
+      type: BlockInputType.preDeneb,
+      block,
+    };
+  },
+
+  postDeneb(config: ChainForkConfig, block: allForks.SignedBeaconBlock, blobs: deneb.BlobsSidecar): BlockInput {
+    if (config.getForkSeq(block.message.slot) < ForkSeq.deneb) {
+      throw Error(`Pre Deneb block slot ${block.message.slot}`);
+    }
+    return {
+      type: BlockInputType.postDeneb,
+      block,
+      blobs,
+    };
+  },
+};
+
+export enum AttestationImportOpt {
+  Skip,
+  Force,
+}
 
 export type ImportBlockOpts = {
   /**
    * TEMP: Review if this is safe, Lighthouse always imports attestations even in finalized sync.
    */
-  skipImportingAttestations?: boolean;
+  importAttestations?: AttestationImportOpt;
   /**
    * If error would trigger BlockErrorCode ALREADY_KNOWN or GENESIS_BLOCK, just ignore the block and don't verify nor
    * import the block and return void | Promise<void>.
@@ -35,6 +82,8 @@ export type ImportBlockOpts = {
    * Metadata: `true` if all the signatures including the proposer signature have been verified
    */
   validSignatures?: boolean;
+  /** Set to true if already run `validateBlobsSidecar()` sucessfully on the blobs */
+  validBlobsSidecar?: boolean;
   /** Seen timestamp seconds */
   seenTimestampSec?: number;
 };
@@ -43,7 +92,7 @@ export type ImportBlockOpts = {
  * A wrapper around a `SignedBeaconBlock` that indicates that this block is fully verified and ready to import
  */
 export type FullyVerifiedBlock = {
-  block: allForks.SignedBeaconBlock;
+  blockInput: BlockInput;
   postState: CachedBeaconStateAllForks;
   parentBlockSlot: Slot;
   proposerBalanceDelta: number;

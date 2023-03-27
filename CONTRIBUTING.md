@@ -1,26 +1,27 @@
 # Contribution Guidelines
 
-Thanks for your contribution to Lodestar. It's people like you that push the Ethereum ecosystem forward.
+Thanks for your interest in contributing to Lodestar. It's people like you that push the Ethereum ecosystem forward.
 
 ## Prerequisites
 
-- :gear: [NodeJS](https://nodejs.org/) (LTS/Gallium)
+- :gear: [NodeJS](https://nodejs.org/) (LTS)
 - :toolbox: [Yarn](https://yarnpkg.com/)/[Lerna](https://lerna.js.org/)
 
 ## Getting Started
 
-- :gear: Run `lerna bootstrap` or `yarn install` to install dependencies.
+- :gear: Run `yarn` to install dependencies.
 - :gear: Run `yarn build` to build lib from source.
 - :package: A `lodestar` binary will be bundled in `./packages/cli/bin`.
-- :computer: Run `./lodestar --help` to get a list of available commands and argurments.
+- :computer: Run `./lodestar --help` to get a list of available commands and arguments.
 
 ## Tests
 
-- :test_tube: Run `lerna run test:spec-min` for minimal spec tests.
-- :test_tube: Run `lerna run test:spec-main` for mainnet spec tests.
 - :test_tube: Run `lerna run test:unit` for unit tests.
 - :test_tube: Run `lerna run test:e2e` for end-to-end tests.
+- :test_tube: Run `lerna run test:spec` for spec tests.
 - :test_tube: Run `lerna run test` to run all tests.
+- :test_tube: Run `yarn check-types` to check TypeScript types.
+- :test_tube: Run `yarn lint` to run the linter (ESLint).
 
 ### Debugging Spec Tests
 
@@ -57,8 +58,10 @@ docker-compose -f docker-compose.yml -f docker-compose.validator.yml up -d
 
 ###### Dockerized metrics + local beacon node:
 
+Run a local beacon with `--metrics` enabled. Then start Prometheus + Grafana with all dashboards in `./dashboards` automatically loaded running:
+
 ```
-docker-compose -f docker/docker-compose.local.yml up -d
+./docker/docker-compose.local_dev.sh
 ```
 
 ## First Time Contributor?
@@ -95,13 +98,13 @@ Pull request titles must be:
 
 - Short and descriptive summary
 - Should be capitalized and written in imperative present tense
-- Not end with period
+- Not end with a period
 
 For example:
 
 > Add Edit on Github button to all the pages
 
-**Pull Request Etiquette** 
+**Pull Request Etiquette**
 
 - Pull requests should remain as drafts when they are not ready for review by maintainers. Open pull requests signal to the maintainers that it's ready for review.
 - If your pull request is no longer applicable or validated to fix an issue, close your pull request.
@@ -183,7 +186,7 @@ Scope is comparable to Module labels but less strict with the definition of comp
 - `scope-documentation`: All issues related to the Lodestar documentation.
 - `scope-interop`: Issues that fix interop issues between Lodestar and CL, EL or tooling.
 - `scope-light-clients`: All issues regarding light client development.
-- `scope-logging`: Issue about logs: hygeine, format issues, improvements.
+- `scope-logging`: Issue about logs: hygiene, format issues, improvements.
 - `scope-memory`: Issues to reduce and improve memory usage.
 - `scope-metrics`: All issues with regards to the exposed metrics.
 - `scope-networking`: All issues related to networking, gossip, and libp2p.
@@ -210,7 +213,7 @@ Issues that target a specific version of the Ethereum consensus spec, shall be t
 - `spec-altair`: Issues targeting the Altair Ethereum consensus spec version.
 - `spec-bellatrix`: Issues targeting the Bellatrix Ethereum consensus spec version.
 
-###### `meta.*` Meta Labels to organize Miscelaneous Issues
+###### `meta.*` Meta Labels to organize Miscellaneous Issues
 
 - `meta-breaking-change`: Introduces breaking changes to DB, Validator, Beacon Node, or CLI interfaces. Handle with care!
 - `meta-dependencies`: Pull requests that update a dependency.

@@ -1,13 +1,18 @@
 import {mapValues} from "@lodestar/utils";
-import {IMetrics} from "../../../metrics/index.js";
+import {Metrics} from "../../../metrics/index.js";
 import {JobItemQueue, JobQueueOpts, QueueType} from "../../../util/queue/index.js";
 import {GossipJobQueues, GossipType, GossipValidatorFn, ResolvedType, ValidatorFnsByType} from "../interface.js";
 
 /**
  * Numbers from https://github.com/sigp/lighthouse/blob/b34a79dc0b02e04441ba01fd0f304d1e203d877d/beacon_node/network/src/beacon_processor/mod.rs#L69
  */
-const gossipQueueOpts: {[K in GossipType]: Pick<JobQueueOpts, "maxLength" | "type" | "maxConcurrency">} = {
-  [GossipType.beacon_block]: {maxLength: 1024, type: QueueType.FIFO},
+const gossipQueueOpts: {
+  [K in GossipType]: Pick<JobQueueOpts, "maxLength" | "type" | "maxConcurrency" | "noYieldIfOneItem">;
+} = {
+  // validation gossip block asap
+  [GossipType.beacon_block]: {maxLength: 1024, type: QueueType.FIFO, noYieldIfOneItem: true},
+  // TODO DENEB: What's a good queue max given that now blocks are much bigger?
+  [GossipType.beacon_block_and_blobs_sidecar]: {maxLength: 32, type: QueueType.FIFO, noYieldIfOneItem: true},
   // lighthoue has aggregate_queue 4096 and unknown_block_aggregate_queue 1024, we use single queue
   [GossipType.beacon_aggregate_and_proof]: {maxLength: 5120, type: QueueType.LIFO, maxConcurrency: 16},
   // lighthouse has attestation_queue 16384 and unknown_block_attestation_queue 8192, we use single queue
@@ -19,6 +24,8 @@ const gossipQueueOpts: {[K in GossipType]: Pick<JobQueueOpts, "maxLength" | "typ
   [GossipType.sync_committee]: {maxLength: 4096, type: QueueType.LIFO, maxConcurrency: 64},
   [GossipType.light_client_finality_update]: {maxLength: 1024, type: QueueType.FIFO},
   [GossipType.light_client_optimistic_update]: {maxLength: 1024, type: QueueType.FIFO},
+  // check ??  MAX_BLS_TO_EXECUTION_CHANGES	2**4 (= 16)
+  [GossipType.bls_to_execution_change]: {maxLength: 1024, type: QueueType.FIFO},
 };
 
 /**
@@ -40,7 +47,7 @@ const gossipQueueOpts: {[K in GossipType]: Pick<JobQueueOpts, "maxLength" | "typ
 export function createValidationQueues(
   gossipValidatorFns: ValidatorFnsByType,
   signal: AbortSignal,
-  metrics: IMetrics | null
+  metrics: Metrics | null
 ): GossipJobQueues {
   return mapValues(gossipQueueOpts, (opts, type) => {
     const gossipValidatorFn = gossipValidatorFns[type];
@@ -53,6 +60,7 @@ export function createValidationQueues(
             droppedJobs: metrics.gossipValidationQueueDroppedJobs.child({topic: type}),
             jobTime: metrics.gossipValidationQueueJobTime.child({topic: type}),
             jobWaitTime: metrics.gossipValidationQueueJobWaitTime.child({topic: type}),
+            concurrency: metrics.gossipValidationQueueConcurrency.child({topic: type}),
           }
         : undefined
     );

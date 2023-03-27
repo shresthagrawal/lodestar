@@ -6,7 +6,11 @@ import {blsSpecTests} from "../specTestVersioning.js";
 import {readdirSyncSpec} from "../utils/specTestIterator.js";
 import {testFnByType} from "./bls.js";
 
-/* eslint-disable @typescript-eslint/naming-convention */
+const skippedTestNames = [
+  // TODO: BLS dealing of the Infinity public key does not allow to validate `infinity_with_true_b_flag`.
+  // This _should_ not have any impact of Beacon Chain in production, so it's ignored until fixed upstream
+  "deserialization_succeeds_infinity_with_true_b_flag.yaml",
+];
 
 /**
  * File path structure:
@@ -37,9 +41,8 @@ for (const fnName of readdirSyncSpec(blsSpecTests.outputDir)) {
           return;
         }
 
-        // TODO: BLS dealing of the Infinity public key does not allow to validate `infinity_with_true_b_flag`.
-        // This _should_ not have any impact of Beacon Chain in production, so it's ignored until fixed upstream
-        if (testName === "deserialization_succeeds_infinity_with_true_b_flag.yaml") {
+        // Do not manually skip tests here, do it in the top of the file
+        if (skippedTestNames.includes(testName)) {
           this.skip();
           return;
         }

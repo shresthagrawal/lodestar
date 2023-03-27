@@ -3,8 +3,8 @@ import {intDiv} from "@lodestar/utils";
 import {EPOCHS_PER_SLASHINGS_VECTOR, FAR_FUTURE_EPOCH, ForkSeq, MAX_EFFECTIVE_BALANCE} from "@lodestar/params";
 
 import {
-  IAttesterStatus,
-  createIAttesterStatus,
+  AttesterStatus,
+  createAttesterStatus,
   hasMarkers,
   FLAG_UNSLASHED,
   FLAG_ELIGIBLE_ATTESTER,
@@ -19,8 +19,6 @@ import {CachedBeaconStateAllForks, CachedBeaconStateAltair, CachedBeaconStatePha
 import {computeBaseRewardPerIncrement} from "../util/altair.js";
 import {processPendingAttestations} from "../epoch/processPendingAttestations.js";
 
-/* eslint-disable @typescript-eslint/naming-convention */
-
 export type EpochProcessOpts = {
   /**
    * Assert progressive balances the same to EpochProcess
@@ -32,7 +30,7 @@ export type EpochProcessOpts = {
  * EpochProcess is the parent object of:
  * - Any data-structures not part of the spec'ed BeaconState
  * - Necessary to only compute data once
- * - Only necessary for epoch processing, can be disposed immediatelly
+ * - Only necessary for epoch processing, can be disposed immediately
  * - Not already part of `EpochContext` {@see} {@link EpochContext}
  *
  * EpochProcess speeds up epoch processing as a whole at the cost of more memory temporarily. This is okay since
@@ -89,12 +87,12 @@ export interface EpochProcess {
   indicesToSlash: ValidatorIndex[];
 
   /**
-   * Indices of validators that just joinned and will be eligible for the active queue.
+   * Indices of validators that just joined and will be eligible for the active queue.
    * ```
    * v.activationEligibilityEpoch === FAR_FUTURE_EPOCH && v.effectiveBalance === MAX_EFFECTIVE_BALANCE
    * ```
    * All validators in indicesEligibleForActivationQueue get activationEligibilityEpoch set. So it can only include
-   * validators that have just joinned the registry through a valid full deposit(s).
+   * validators that have just joined the registry through a valid full deposit(s).
    * ```
    * max indicesEligibleForActivationQueue = SLOTS_PER_EPOCH * MAX_DEPOSITS
    * ```
@@ -130,7 +128,7 @@ export interface EpochProcess {
    * - prev attester flag set
    * With a status flag to check this conditions at once we just have to mask with an OR of the conditions.
    */
-  statuses: IAttesterStatus[];
+  statuses: AttesterStatus[];
 
   /**
    * balances array will be populated by processRewardsAndPenalties() and consumed by processEffectiveBalanceUpdates().
@@ -189,12 +187,12 @@ export function beforeProcessEpoch(state: CachedBeaconStateAllForks, opts?: Epoc
   const nextEpochShufflingActiveValidatorIndices: ValidatorIndex[] = [];
   const isActivePrevEpoch: boolean[] = [];
   const isActiveNextEpoch: boolean[] = [];
-  const statuses: IAttesterStatus[] = [];
+  const statuses: AttesterStatus[] = [];
 
   let totalActiveStakeByIncrement = 0;
 
   // To optimize memory each validator node in `state.validators` is represented with a special node type
-  // `BranchNodeStruct` that represents the data as struct internally. This utility grabs the struct data directrly
+  // `BranchNodeStruct` that represents the data as struct internally. This utility grabs the struct data directly
   // from the nodes without any extra transformation. The returned `validators` array contains native JS objects.
   const validators = state.validators.getAllReadonlyValues();
   const validatorCount = validators.length;
@@ -206,7 +204,7 @@ export function beforeProcessEpoch(state: CachedBeaconStateAllForks, opts?: Epoc
 
   for (let i = 0; i < validatorCount; i++) {
     const validator = validators[i];
-    const status = createIAttesterStatus();
+    const status = createAttesterStatus();
 
     if (validator.slashed) {
       if (slashingsEpoch === validator.withdrawableEpoch) {

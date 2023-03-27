@@ -1,10 +1,10 @@
 import {SLOTS_PER_EPOCH} from "@lodestar/params";
-import {extendError, sleep} from "@lodestar/utils";
+import {sleep} from "@lodestar/utils";
 import {computeEpochAtSlot, isAggregatorFromCommitteeLength} from "@lodestar/state-transition";
 import {BLSSignature, Epoch, Slot, ValidatorIndex, RootHex} from "@lodestar/types";
-import {Api, routes} from "@lodestar/api";
+import {Api, ApiError, routes} from "@lodestar/api";
 import {toHexString} from "@chainsafe/ssz";
-import {batchItems, IClock, ILoggerVc} from "../util/index.js";
+import {batchItems, IClock, LoggerVc} from "../util/index.js";
 import {PubkeyHex} from "../types.js";
 import {Metrics} from "../metrics.js";
 import {ValidatorStore} from "./validatorStore.js";
@@ -41,7 +41,7 @@ export class AttestationDutiesService {
   private readonly pendingDependentRootByEpoch = new Map<Epoch, RootHex>();
 
   constructor(
-    private readonly logger: ILoggerVc,
+    private readonly logger: LoggerVc,
     private readonly api: Api,
     private clock: IClock,
     private readonly validatorStore: ValidatorStore,
@@ -193,9 +193,11 @@ export class AttestationDutiesService {
     // If there are any subscriptions, push them out to the beacon node.
     if (beaconCommitteeSubscriptions.length > 0) {
       const subscriptionsBatches = batchItems(beaconCommitteeSubscriptions, {batchSize: SUBSCRIPTIONS_PER_REQUEST});
-      await Promise.all(subscriptionsBatches.map(this.api.validator.prepareBeaconCommitteeSubnet)).catch((e: Error) => {
-        throw extendError(e, "Failed to subscribe to beacon committee subnets");
-      });
+      const responses = await Promise.all(subscriptionsBatches.map(this.api.validator.prepareBeaconCommitteeSubnet));
+
+      for (const res of responses) {
+        ApiError.assert(res, "Failed to subscribe to beacon committee subnets");
+      }
     }
   }
 
@@ -208,10 +210,9 @@ export class AttestationDutiesService {
       return;
     }
 
-    const attesterDuties = await this.api.validator.getAttesterDuties(epoch, indexArr).catch((e: Error) => {
-      throw extendError(e, "Failed to obtain attester duty");
-    });
-
+    const res = await this.api.validator.getAttesterDuties(epoch, indexArr);
+    ApiError.assert(res, "Failed to obtain attester duty");
+    const attesterDuties = res.response;
     const {dependentRoot} = attesterDuties;
     const relevantDuties = attesterDuties.data.filter((duty) => {
       const pubkeyHex = toHexString(duty.pubkey);

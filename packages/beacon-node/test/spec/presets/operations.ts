@@ -2,14 +2,19 @@ import {
   BeaconStateAllForks,
   CachedBeaconStateAllForks,
   CachedBeaconStateBellatrix,
+  CachedBeaconStateCapella,
+  DataAvailableStatus,
+  ExecutionPayloadStatus,
   getBlockRootAtSlot,
 } from "@lodestar/state-transition";
 import * as blockFns from "@lodestar/state-transition/block";
-import {ssz, phase0, altair, bellatrix} from "@lodestar/types";
+import {ssz, phase0, altair, bellatrix, capella} from "@lodestar/types";
 import {InputType} from "@lodestar/spec-test-util";
+import {ForkName} from "@lodestar/params";
+
 import {createCachedBeaconStateTest} from "../../utils/cachedBeaconState.js";
 import {expectEqualBeaconState, inputTypeSszTreeViewDU} from "../utils/expectEqualBeaconState.js";
-import {getConfig} from "../utils/getConfig.js";
+import {getConfig} from "../../utils/config.js";
 import {BaseSpecTest, shouldVerify, TestRunnerFn} from "../utils/types.js";
 
 /* eslint-disable @typescript-eslint/naming-convention */
@@ -65,11 +70,27 @@ const operationFns: Record<string, BlockProcessFn<CachedBeaconStateAllForks>> = 
     state,
     testCase: {execution_payload: bellatrix.ExecutionPayload; execution: {execution_valid: boolean}}
   ) => {
+    const fork = state.config.getForkSeq(state.slot);
     blockFns.processExecutionPayload(
+      fork,
       (state as CachedBeaconStateAllForks) as CachedBeaconStateBellatrix,
       testCase.execution_payload,
-      {notifyNewPayload: () => testCase.execution.execution_valid}
+      {
+        executionPayloadStatus: testCase.execution.execution_valid
+          ? ExecutionPayloadStatus.valid
+          : ExecutionPayloadStatus.invalid,
+        // TODO Deneb: Make this value dynamic on fork Deneb
+        dataAvailableStatus: DataAvailableStatus.preDeneb,
+      }
     );
+  },
+
+  bls_to_execution_change: (state, testCase: {address_change: capella.SignedBLSToExecutionChange}) => {
+    blockFns.processBlsToExecutionChange(state as CachedBeaconStateCapella, testCase.address_change);
+  },
+
+  withdrawals: (state, testCase: {execution_payload: capella.ExecutionPayload}) => {
+    blockFns.processWithdrawals(state as CachedBeaconStateCapella, testCase.execution_payload);
   },
 };
 
@@ -112,13 +133,21 @@ export const operations: TestRunnerFn<OperationsTestCase, BeaconStateAllForks> =
         // Altair
         sync_aggregate: ssz.altair.SyncAggregate,
         // Bellatrix
-        execution_payload: ssz.bellatrix.ExecutionPayload,
+        execution_payload:
+          fork !== ForkName.phase0 && fork !== ForkName.altair
+            ? ssz.allForksExecution[fork as ExecutionFork].ExecutionPayload
+            : ssz.bellatrix.ExecutionPayload,
+        // Capella
+        address_change: ssz.capella.SignedBLSToExecutionChange,
       },
       shouldError: (testCase) => testCase.post === undefined,
       getExpected: (testCase) => testCase.post,
       expectFunc: (testCase, expected, actual) => {
         expectEqualBeaconState(fork, expected, actual);
       },
+      // Do not manually skip tests here, do it in packages/beacon-node/test/spec/presets/index.test.ts
     },
   };
 };
+
+type ExecutionFork = Exclude<ForkName, ForkName.phase0 | ForkName.altair>;

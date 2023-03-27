@@ -1,7 +1,8 @@
 import {SLOTS_PER_EPOCH} from "@lodestar/params";
 import {pruneSetToMax} from "@lodestar/utils";
-import {IMetrics} from "../../metrics/index.js";
+import {Metrics} from "../../metrics/index.js";
 import {DATA, QUANTITY} from "../../eth1/provider/utils.js";
+import {PayloadAttributesRpc} from "./types.js";
 
 // Idealy this only need to be set to the max head reorgs number
 const MAX_PAYLOAD_IDS = SLOTS_PER_EPOCH;
@@ -10,20 +11,18 @@ const MAX_PAYLOAD_IDS = SLOTS_PER_EPOCH;
 // Since we do no processing with this id, we have no need to deserialize it
 export type PayloadId = string;
 
-export type ApiPayloadAttributes = {
-  /** QUANTITY, 64 Bits - value for the timestamp field of the new payload */
-  timestamp: QUANTITY;
-  /** DATA, 32 Bytes - value for the prevRandao field of the new payload */
-  prevRandao: DATA;
-  /** DATA, 20 Bytes - suggested value for the coinbase field of the new payload */
-  suggestedFeeRecipient: DATA;
+export type WithdrawalV1 = {
+  index: QUANTITY;
+  validatorIndex: QUANTITY;
+  address: DATA;
+  amount: QUANTITY;
 };
 
-type FcuAttributes = {headBlockHash: DATA; finalizedBlockHash: DATA} & ApiPayloadAttributes;
+type FcuAttributes = {headBlockHash: DATA; finalizedBlockHash: DATA} & Omit<PayloadAttributesRpc, "withdrawals">;
 
 export class PayloadIdCache {
   private readonly payloadIdByFcuAttributes = new Map<string, {payloadId: PayloadId; fullKey: string}>();
-  constructor(private readonly metrics?: IMetrics | null) {}
+  constructor(private readonly metrics?: Metrics | null) {}
 
   getFullKey({headBlockHash, finalizedBlockHash, timestamp, prevRandao, suggestedFeeRecipient}: FcuAttributes): string {
     return `${headBlockHash}-${finalizedBlockHash}-${timestamp}-${prevRandao}-${suggestedFeeRecipient}`;

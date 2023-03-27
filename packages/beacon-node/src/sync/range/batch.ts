@@ -1,8 +1,9 @@
 import {PeerId} from "@libp2p/interface-peer-id";
-import {allForks, Epoch, phase0, RootHex} from "@lodestar/types";
-import {IChainForkConfig} from "@lodestar/config";
+import {Epoch, phase0, RootHex} from "@lodestar/types";
+import {ChainForkConfig} from "@lodestar/config";
 import {LodestarError} from "@lodestar/utils";
 import {MAX_BATCH_DOWNLOAD_ATTEMPTS, MAX_BATCH_PROCESSING_ATTEMPTS} from "../constants.js";
+import {BlockInput} from "../../chain/blocks/types.js";
 import {BlockError, BlockErrorCode} from "../../chain/errors/index.js";
 import {getBatchSlotRange, hashBlocks} from "./utils/index.js";
 
@@ -38,7 +39,7 @@ export type Attempt = {
 export type BatchState =
   | {status: BatchStatus.AwaitingDownload}
   | {status: BatchStatus.Downloading; peer: PeerId}
-  | {status: BatchStatus.AwaitingProcessing; peer: PeerId; blocks: allForks.SignedBeaconBlock[]}
+  | {status: BatchStatus.AwaitingProcessing; peer: PeerId; blocks: BlockInput[]}
   | {status: BatchStatus.Processing; attempt: Attempt}
   | {status: BatchStatus.AwaitingValidation; attempt: Attempt};
 
@@ -70,9 +71,9 @@ export class Batch {
   readonly executionErrorAttempts: Attempt[] = [];
   /** The number of download retries this batch has undergone due to a failed request. */
   private readonly failedDownloadAttempts: PeerId[] = [];
-  private readonly config: IChainForkConfig;
+  private readonly config: ChainForkConfig;
 
-  constructor(startEpoch: Epoch, config: IChainForkConfig) {
+  constructor(startEpoch: Epoch, config: ChainForkConfig) {
     const {startSlot, count} = getBatchSlotRange(startEpoch);
 
     this.config = config;
@@ -109,7 +110,7 @@ export class Batch {
   /**
    * Downloading -> AwaitingProcessing
    */
-  downloadingSuccess(blocks: allForks.SignedBeaconBlock[]): void {
+  downloadingSuccess(blocks: BlockInput[]): void {
     if (this.state.status !== BatchStatus.Downloading) {
       throw new BatchError(this.wrongStatusErrorType(BatchStatus.Downloading));
     }
@@ -136,7 +137,7 @@ export class Batch {
   /**
    * AwaitingProcessing -> Processing
    */
-  startProcessing(): allForks.SignedBeaconBlock[] {
+  startProcessing(): BlockInput[] {
     if (this.state.status !== BatchStatus.AwaitingProcessing) {
       throw new BatchError(this.wrongStatusErrorType(BatchStatus.AwaitingProcessing));
     }

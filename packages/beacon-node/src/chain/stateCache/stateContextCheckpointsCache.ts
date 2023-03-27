@@ -3,7 +3,7 @@ import {phase0, Epoch, RootHex} from "@lodestar/types";
 import {CachedBeaconStateAllForks} from "@lodestar/state-transition";
 import {MapDef} from "@lodestar/utils";
 import {routes} from "@lodestar/api";
-import {IMetrics} from "../../metrics/index.js";
+import {Metrics} from "../../metrics/index.js";
 import {MapTracker} from "./mapMetrics.js";
 
 type CheckpointHex = {epoch: Epoch; rootHex: RootHex};
@@ -19,11 +19,11 @@ export class CheckpointStateCache {
   private readonly cache: MapTracker<string, CachedBeaconStateAllForks>;
   /** Epoch -> Set<blockRoot> */
   private readonly epochIndex = new MapDef<Epoch, Set<string>>(() => new Set<string>());
-  private readonly metrics: IMetrics["cpStateCache"] | null | undefined;
+  private readonly metrics: Metrics["cpStateCache"] | null | undefined;
   private preComputedCheckpoint: string | null = null;
   private preComputedCheckpointHits: number | null = null;
 
-  constructor({metrics}: {metrics?: IMetrics | null}) {
+  constructor({metrics}: {metrics?: Metrics | null}) {
     this.cache = new MapTracker(metrics?.cpStateCache);
     if (metrics) {
       this.metrics = metrics.cpStateCache;
@@ -48,9 +48,6 @@ export class CheckpointStateCache {
     }
 
     this.metrics?.stateClonedCount.observe(item.clonedCount);
-    if (!stateInternalCachePopulated(item)) {
-      this.metrics?.stateInternalCacheMiss.inc();
-    }
 
     return item;
   }
@@ -162,16 +159,3 @@ export function toCheckpointHex(checkpoint: phase0.Checkpoint): CheckpointHex {
 export function toCheckpointKey(cp: CheckpointHex): string {
   return `${cp.rootHex}:${cp.epoch}`;
 }
-
-/**
- * Given a CachedBeaconState, check if validators array internal cache is populated.
- * This cache is populated during epoch transition, and should be preserved for performance.
- * If the cache is missing too often, means that our clone strategy is not working well.
- */
-export function stateInternalCachePopulated(state: CachedBeaconStateAllForks): boolean {
-  return ((state.validators as unknown) as ViewDU).nodesPopulated === true;
-}
-
-type ViewDU = {
-  nodesPopulated: boolean;
-};

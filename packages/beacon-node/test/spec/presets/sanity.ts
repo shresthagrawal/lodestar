@@ -1,12 +1,18 @@
 import {InputType} from "@lodestar/spec-test-util";
-import {BeaconStateAllForks, processSlots, stateTransition} from "@lodestar/state-transition";
-import {allForks, bellatrix, ssz} from "@lodestar/types";
+import {
+  BeaconStateAllForks,
+  DataAvailableStatus,
+  ExecutionPayloadStatus,
+  processSlots,
+  stateTransition,
+} from "@lodestar/state-transition";
+import {allForks, deneb, ssz} from "@lodestar/types";
 import {ForkName} from "@lodestar/params";
 import {bnToNum} from "@lodestar/utils";
 import {createCachedBeaconStateTest} from "../../utils/cachedBeaconState.js";
 import {expectEqualBeaconState, inputTypeSszTreeViewDU} from "../utils/expectEqualBeaconState.js";
 import {shouldVerify, TestRunnerFn} from "../utils/types.js";
-import {getConfig} from "../utils/getConfig.js";
+import {getConfig} from "../../utils/config.js";
 import {assertCorrectProgressiveBalances} from "../config.js";
 
 /* eslint-disable @typescript-eslint/naming-convention */
@@ -44,6 +50,7 @@ const sanitySlots: TestRunnerFn<SanitySlotsTestCase, BeaconStateAllForks> = (for
       expectFunc: (testCase, expected, actual) => {
         expectEqualBeaconState(fork, expected, actual);
       },
+      // Do not manually skip tests here, do it in packages/beacon-node/test/spec/presets/index.test.ts
     },
   };
 };
@@ -55,8 +62,11 @@ export const sanityBlocks: TestRunnerFn<SanityBlocksTestCase, BeaconStateAllFork
       let wrappedState = createCachedBeaconStateTest(stateTB, getConfig(fork));
       const verify = shouldVerify(testcase);
       for (let i = 0; i < testcase.meta.blocks_count; i++) {
-        const signedBlock = testcase[`blocks_${i}`] as bellatrix.SignedBeaconBlock;
+        const signedBlock = testcase[`blocks_${i}`] as deneb.SignedBeaconBlock;
         wrappedState = stateTransition(wrappedState, signedBlock, {
+          // TODO DENEB: Should assume valid and available for this test?
+          executionPayloadStatus: ExecutionPayloadStatus.valid,
+          dataAvailableStatus: DataAvailableStatus.available,
           verifyStateRoot: verify,
           verifyProposer: verify,
           verifySignatures: verify,
@@ -78,6 +88,7 @@ export const sanityBlocks: TestRunnerFn<SanityBlocksTestCase, BeaconStateAllFork
       expectFunc: (testCase, expected, actual) => {
         expectEqualBeaconState(fork, expected, actual);
       },
+      // Do not manually skip tests here, do it in packages/beacon-node/test/spec/presets/index.test.ts
     },
   };
 };
@@ -103,6 +114,7 @@ type SanityBlocksTestCase = {
 };
 
 type SanitySlotsTestCase = {
+  meta?: any;
   pre: BeaconStateAllForks;
   post?: BeaconStateAllForks;
   slots: bigint;

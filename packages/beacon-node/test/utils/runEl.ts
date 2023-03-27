@@ -2,7 +2,7 @@ import fs from "node:fs";
 import net from "node:net";
 import {spawn} from "node:child_process";
 import {sleep} from "@lodestar/utils";
-import {IChainConfig} from "@lodestar/config";
+import {ChainConfig} from "@lodestar/config";
 import {Eth1Provider} from "../../src/index.js";
 import {ZERO_HASH} from "../../src/constants/index.js";
 import {shell} from "../sim/shell.js";
@@ -15,7 +15,7 @@ export enum ELStartMode {
   PostMerge = "post-merge",
 }
 
-export type ELSetupConfig = {mode: ELStartMode; elScriptDir: string; elBinaryDir: string};
+export type ELSetupConfig = {mode: ELStartMode; elScriptDir: string; elBinaryDir: string; genesisTemplate?: string};
 export type ELRunOptions = {ttd: bigint; dataPath: string; jwtSecretHex: string; enginePort: number; ethPort: number};
 export type ELClient = {
   genesisBlockHash: string;
@@ -35,13 +35,14 @@ export type ELClient = {
  */
 
 export async function runEL(
-  {mode, elScriptDir, elBinaryDir}: ELSetupConfig,
+  {mode, elScriptDir, elBinaryDir, genesisTemplate: template}: ELSetupConfig,
   {ttd, dataPath, jwtSecretHex, enginePort, ethPort}: ELRunOptions,
   signal: AbortSignal
 ): Promise<{elClient: ELClient; tearDownCallBack: () => Promise<void>}> {
   const network = `${elScriptDir}/${mode}`;
   const ethRpcUrl = `http://127.0.0.1:${ethPort}`;
   const engineRpcUrl = `http://127.0.0.1:${enginePort}`;
+  const genesisTemplate = template ?? "genesisPre.tmpl";
 
   await shell(`sudo rm -rf ${dataPath}`);
   fs.mkdirSync(dataPath, {recursive: true});
@@ -54,6 +55,7 @@ export async function runEL(
     ENGINE_PORT: `${enginePort}`,
     ETH_PORT: `${ethPort}`,
     JWT_SECRET_HEX: jwtSecretHex,
+    TEMPLATE_FILE: genesisTemplate,
   });
 
   // Wait for Geth to be online
@@ -93,7 +95,7 @@ async function getGenesisBlockHash(
   signal: AbortSignal
 ): Promise<string> {
   const eth1Provider = new Eth1Provider(
-    ({DEPOSIT_CONTRACT_ADDRESS: ZERO_HASH} as Partial<IChainConfig>) as IChainConfig,
+    ({DEPOSIT_CONTRACT_ADDRESS: ZERO_HASH} as Partial<ChainConfig>) as ChainConfig,
     {providerUrls: [providerUrl], jwtSecretHex},
     signal
   );
@@ -104,6 +106,7 @@ async function getGenesisBlockHash(
     console.log(`fetching genesisBlock hash, try: ${i}`);
     try {
       const genesisBlock = await eth1Provider.getBlockByNumber(0);
+      console.log({genesisBlock});
       if (!genesisBlock) {
         throw Error("No genesis block available");
       }
@@ -124,8 +127,9 @@ async function startELProcess(args: {
   ENGINE_PORT: string;
   ETH_PORT: string;
   JWT_SECRET_HEX: string;
+  TEMPLATE_FILE: string;
 }): Promise<() => Promise<void>> {
-  const {runScriptPath, TTD, DATA_DIR, EL_BINARY_DIR, ENGINE_PORT, ETH_PORT, JWT_SECRET_HEX} = args;
+  const {runScriptPath, TTD, DATA_DIR, EL_BINARY_DIR, ENGINE_PORT, ETH_PORT, JWT_SECRET_HEX, TEMPLATE_FILE} = args;
 
   //Passing process.env as it might have important PATH/docker socket info set
   const gethProc = spawn(runScriptPath, [], {
@@ -137,6 +141,7 @@ async function startELProcess(args: {
       TTD,
       DATA_DIR,
       JWT_SECRET_HEX,
+      TEMPLATE_FILE,
     },
   });
 
@@ -160,7 +165,12 @@ async function startELProcess(args: {
     }
 
     console.log("Killing EL process", gethProc.pid);
-    await shell(`pkill -15 -P ${gethProc.pid}`);
+    try {
+      await shell(`pkill -15 -P ${gethProc.pid}`);
+      await shell("docker rm -f custom-execution");
+    } catch (e) {
+      console.log("Killing EL error", (e as Error).message);
+    }
 
     // Wait for the P2P to be offline
     await waitForELOffline(ENGINE_PORT);
@@ -184,7 +194,7 @@ async function waitForELOffline(ENGINE_PORT: string): Promise<void> {
 }
 
 async function isPortInUse(port: number): Promise<boolean> {
-  return await new Promise<boolean>((resolve, reject) => {
+  return new Promise<boolean>((resolve, reject) => {
     const server = net.createServer();
     server.once("error", function (err) {
       if (((err as unknown) as {code: string}).code === "EADDRINUSE") {

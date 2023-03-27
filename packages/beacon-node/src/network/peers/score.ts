@@ -1,7 +1,7 @@
 import {PeerId} from "@libp2p/interface-peer-id";
 import {MapDef, pruneSetToMax} from "@lodestar/utils";
-import {gossipScoreThresholds} from "../gossip/scoringParameters.js";
-import {IMetrics} from "../../metrics/index.js";
+import {gossipScoreThresholds, negativeGossipScoreIgnoreThreshold} from "../gossip/scoringParameters.js";
+import {Metrics} from "../../metrics/index.js";
 
 /** The default score for new peers */
 const DEFAULT_SCORE = 0;
@@ -18,10 +18,10 @@ const MAX_SCORE = 100;
 const MIN_SCORE = -100;
 /** Drop score if absolute value is below this threshold */
 const SCORE_THRESHOLD = 1;
-/** The halflife of a peer's score. I.e the number of miliseconds it takes for the score to decay to half its value */
+/** The halflife of a peer's score. I.e the number of milliseconds it takes for the score to decay to half its value */
 const SCORE_HALFLIFE_MS = 10 * 60 * 1000;
 const HALFLIFE_DECAY_MS = -Math.log(2) / SCORE_HALFLIFE_MS;
-/** The number of miliseconds we ban a peer for before their score begins to decay */
+/** The number of milliseconds we ban a peer for before their score begins to decay */
 const BANNED_BEFORE_DECAY_MS = 30 * 60 * 1000;
 /** Limit of entries in the scores map */
 const MAX_ENTRIES = 1000;
@@ -78,15 +78,27 @@ type PeerIdStr = string;
 
 export interface IPeerRpcScoreStore {
   getScore(peer: PeerId): number;
+  getGossipScore(peer: PeerId): number;
   getScoreState(peer: PeerId): ScoreState;
+  dumpPeerScoreStats(): PeerScoreStats;
   applyAction(peer: PeerId, action: PeerAction, actionName: string): void;
   update(): void;
   updateGossipsubScore(peerId: PeerIdStr, newScore: number, ignore: boolean): void;
 }
 
-export interface IPeerRpcScoreStoreModules {
-  metrics: IMetrics | null;
-}
+export type PeerRpcScoreStoreModules = {
+  metrics: Metrics | null;
+};
+
+export type PeerScoreStats = ({peerId: PeerIdStr} & PeerScoreStat)[];
+
+export type PeerScoreStat = {
+  lodestarScore: number;
+  gossipScore: number;
+  ignoreNegativeGossipScore: boolean;
+  score: number;
+  lastUpdate: number;
+};
 
 /**
  * A peer's score (perceived potential usefulness).
@@ -95,12 +107,11 @@ export interface IPeerRpcScoreStoreModules {
  */
 export class PeerRpcScoreStore implements IPeerRpcScoreStore {
   private readonly scores = new MapDef<PeerIdStr, PeerScore>(() => new PeerScore());
-  private readonly metrics: IMetrics | null;
-  private readonly lastUpdate = new Map<string, number>();
+  private readonly metrics: Metrics | null;
 
   // TODO: Persist scores, at least BANNED status to disk
 
-  constructor(metrics: IMetrics | null = null) {
+  constructor(metrics: Metrics | null = null) {
     this.metrics = metrics;
   }
 
@@ -108,8 +119,16 @@ export class PeerRpcScoreStore implements IPeerRpcScoreStore {
     return this.scores.get(peer.toString())?.getScore() ?? DEFAULT_SCORE;
   }
 
+  getGossipScore(peer: PeerId): number {
+    return this.scores.get(peer.toString())?.getGossipScore() ?? DEFAULT_SCORE;
+  }
+
   getScoreState(peer: PeerId): ScoreState {
     return scoreToState(this.getScore(peer));
+  }
+
+  dumpPeerScoreStats(): PeerScoreStats {
+    return Array.from(this.scores.entries()).map(([peerId, peerScore]) => ({peerId, ...peerScore.getStat()}));
   }
 
   applyAction(peer: PeerId, action: PeerAction, actionName: string): void {
@@ -162,6 +181,10 @@ export class PeerScore {
     return this.score;
   }
 
+  getGossipScore(): number {
+    return this.gossipScore;
+  }
+
   add(scoreDelta: number): void {
     let newScore = this.lodestarScore + scoreDelta;
     if (newScore > MAX_SCORE) newScore = MAX_SCORE;
@@ -183,7 +206,7 @@ export class PeerScore {
     // Using exponential decay based on a constant half life.
     const sinceLastUpdateMs = nowMs - this.lastUpdate;
     // If peer was banned, lastUpdate will be in the future
-    if (sinceLastUpdateMs > 0 && this.lodestarScore !== 0) {
+    if (sinceLastUpdateMs > 0) {
       this.lastUpdate = nowMs;
       // e^(-ln(2)/HL*t)
       const decayFactor = Math.exp(HALFLIFE_DECAY_MS * sinceLastUpdateMs);
@@ -200,6 +223,16 @@ export class PeerScore {
       this.gossipScore = newScore;
       this.ignoreNegativeGossipScore = ignore;
     }
+  }
+
+  getStat(): PeerScoreStat {
+    return {
+      lodestarScore: this.lodestarScore,
+      gossipScore: this.gossipScore,
+      ignoreNegativeGossipScore: this.ignoreNegativeGossipScore,
+      score: this.score,
+      lastUpdate: this.lastUpdate,
+    };
   }
 
   /**
@@ -259,7 +292,7 @@ export function updateGossipsubScores(
     const gossipsubScore = gossipsubScores.get(peerId);
     if (gossipsubScore !== undefined) {
       let ignore = false;
-      if (gossipsubScore < 0 && toIgnoreNegativePeers > 0) {
+      if (gossipsubScore < 0 && gossipsubScore > negativeGossipScoreIgnoreThreshold && toIgnoreNegativePeers > 0) {
         // We ignore the negative score for the best negative peers so that their
         // gossipsub score can recover without getting disconnected.
         ignore = true;

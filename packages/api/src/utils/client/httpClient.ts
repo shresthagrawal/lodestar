@@ -1,8 +1,10 @@
 import {fetch} from "cross-fetch";
-import {ErrorAborted, ILogger, TimeoutError} from "@lodestar/utils";
+import {ErrorAborted, Logger, TimeoutError} from "@lodestar/utils";
 import {ReqGeneric, RouteDef} from "../index.js";
+import {ApiClientResponse, ApiClientSuccessResponse} from "../../interfaces.js";
 import {stringifyQuery, urlJoin} from "./format.js";
 import {Metrics} from "./metrics.js";
+import {HttpStatusCode} from "./httpStatusCode.js";
 
 /** A higher default timeout, validator will sets its own shorter timeoutMs */
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -26,6 +28,28 @@ export class HttpError extends Error {
   }
 }
 
+export class ApiError extends Error {
+  status: number;
+  operationId: string;
+
+  constructor(message: string, status: number, operationId: string) {
+    super(message);
+    this.status = status;
+    this.operationId = operationId;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  static assert(res: ApiClientResponse, message?: string): asserts res is ApiClientSuccessResponse<any, unknown> {
+    if (!res.ok) {
+      throw new ApiError([message, res.error.message].join(" - "), res.error.code, res.error.operationId);
+    }
+  }
+
+  toString(): string {
+    return `${this.message} (status=${this.status}, operationId=${this.operationId})`;
+  }
+}
+
 export interface URLOpts {
   baseUrl: string;
   timeoutMs?: number;
@@ -45,9 +69,9 @@ export type FetchOpts = {
 
 export interface IHttpClient {
   baseUrl: string;
-  json<T>(opts: FetchOpts): Promise<T>;
-  request(opts: FetchOpts): Promise<void>;
-  arrayBuffer(opts: FetchOpts): Promise<ArrayBuffer>;
+  json<T>(opts: FetchOpts): Promise<{status: HttpStatusCode; body: T}>;
+  request(opts: FetchOpts): Promise<{status: HttpStatusCode; body: void}>;
+  arrayBuffer(opts: FetchOpts): Promise<{status: HttpStatusCode; body: ArrayBuffer}>;
 }
 
 export type HttpClientOptions = ({baseUrl: string} | {urls: (string | URLOpts)[]}) & {
@@ -60,9 +84,11 @@ export type HttpClientOptions = ({baseUrl: string} | {urls: (string | URLOpts)[]
 };
 
 export type HttpClientModules = {
-  logger?: ILogger;
+  logger?: Logger;
   metrics?: Metrics;
 };
+
+export {Metrics};
 
 export class HttpClient implements IHttpClient {
   private readonly globalTimeoutMs: number;
@@ -70,7 +96,7 @@ export class HttpClient implements IHttpClient {
   private readonly getAbortSignal?: () => AbortSignal | undefined;
   private readonly fetch: typeof fetch;
   private readonly metrics: null | Metrics;
-  private readonly logger: null | ILogger;
+  private readonly logger: null | Logger;
 
   private readonly urlsOpts: URLOpts[] = [];
   private readonly urlsScore: number[];
@@ -124,19 +150,22 @@ export class HttpClient implements IHttpClient {
     }
   }
 
-  async json<T>(opts: FetchOpts): Promise<T> {
-    return await this.requestWithBodyWithRetries<T>(opts, (res) => res.json() as Promise<T>);
+  async json<T>(opts: FetchOpts): Promise<{status: HttpStatusCode; body: T}> {
+    return this.requestWithBodyWithRetries<T>(opts, (res) => res.json() as Promise<T>);
   }
 
-  async request(opts: FetchOpts): Promise<void> {
-    return await this.requestWithBodyWithRetries<void>(opts, async (_res) => void 0);
+  async request(opts: FetchOpts): Promise<{status: HttpStatusCode; body: void}> {
+    return this.requestWithBodyWithRetries<void>(opts, async () => undefined);
   }
 
-  async arrayBuffer(opts: FetchOpts): Promise<ArrayBuffer> {
-    return await this.requestWithBodyWithRetries<ArrayBuffer>(opts, (res) => res.arrayBuffer());
+  async arrayBuffer(opts: FetchOpts): Promise<{status: HttpStatusCode; body: ArrayBuffer}> {
+    return this.requestWithBodyWithRetries<ArrayBuffer>(opts, (res) => res.arrayBuffer());
   }
 
-  private async requestWithBodyWithRetries<T>(opts: FetchOpts, getBody: (res: Response) => Promise<T>): Promise<T> {
+  private async requestWithBodyWithRetries<T>(
+    opts: FetchOpts,
+    getBody: (res: Response) => Promise<T>
+  ): Promise<{status: HttpStatusCode; body: T}> {
     // Early return when no fallback URLs are setup
     if (this.urlsOpts.length === 1) {
       return this.requestWithBody(this.urlsOpts[0], opts, getBody);
@@ -152,7 +181,7 @@ export class HttpClient implements IHttpClient {
     // First loop: retry in sequence, query next URL only after previous errors
     for (; i < this.urlsOpts.length; i++) {
       try {
-        return await new Promise<T>((resolve, reject) => {
+        return await new Promise<{status: HttpStatusCode; body: T}>((resolve, reject) => {
           let requestCount = 0;
           let errorCount = 0;
 
@@ -216,7 +245,7 @@ export class HttpClient implements IHttpClient {
     urlOpts: URLOpts,
     opts: FetchOpts,
     getBody: (res: Response) => Promise<T>
-  ): Promise<T> {
+  ): Promise<{status: HttpStatusCode; body: T}> {
     const baseUrl = urlOpts.baseUrl;
     const bearerToken = urlOpts.bearerToken ?? this.globalBearerToken;
     const timeoutMs = opts.timeoutMs ?? urlOpts.timeoutMs ?? this.globalTimeoutMs;
@@ -258,9 +287,11 @@ export class HttpClient implements IHttpClient {
         throw new HttpError(`${res.statusText}: ${getErrorMessage(errBody)}`, res.status, url);
       }
 
+      const streamTimer = this.metrics?.streamTime.startTimer({routeId});
+      const body = await getBody(res);
+      streamTimer?.();
       this.logger?.debug("HttpClient response", {routeId});
-
-      return await getBody(res);
+      return {status: res.status, body};
     } catch (e) {
       this.metrics?.requestErrors.inc({routeId});
 

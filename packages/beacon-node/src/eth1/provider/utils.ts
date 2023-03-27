@@ -3,8 +3,6 @@ import {bytesToBigInt, bigIntToBytes} from "@lodestar/utils";
 import {fromHexString, toHexString} from "@chainsafe/ssz";
 import {ErrorParseJson} from "./jsonRpcHttpClient.js";
 
-/* eslint-disable @typescript-eslint/naming-convention */
-
 /** QUANTITY as defined in ethereum execution layer JSON RPC https://eth.wiki/json-rpc/API */
 export type QUANTITY = string;
 /** DATA as defined in ethereum execution layer JSON RPC https://eth.wiki/json-rpc/API */
@@ -21,7 +19,9 @@ export function isJsonRpcTruncatedError(error: Error): boolean {
     // Truncated responses usually get as 200 but since it's truncated the JSON will be invalid
     error instanceof ErrorParseJson ||
     // Otherwise guess Infura error message of too many events
-    (error instanceof Error && error.message.includes("query returned more than 10000 results"))
+    (error instanceof Error && error.message.includes("query returned more than 10000 results")) ||
+    // Nethermind enforces limits on JSON RPC batch calls
+    (error instanceof Error && error.message.toLowerCase().includes("batch size limit exceeded"))
   );
 }
 
@@ -106,10 +106,10 @@ export function bytesToData(bytes: Uint8Array): DATA {
 /**
  * DATA as defined in ethereum execution layer JSON RPC https://eth.wiki/json-rpc/API
  */
-export function dataToBytes(hex: DATA, fixedLength?: number): Uint8Array {
+export function dataToBytes(hex: DATA, fixedLength: number | null): Uint8Array {
   try {
     const bytes = fromHexString(hex);
-    if (fixedLength !== undefined && bytes.length !== fixedLength) {
+    if (fixedLength != null && bytes.length !== fixedLength) {
       throw Error(`Wrong data length ${bytes.length} expected ${fixedLength}`);
     }
     return bytes;

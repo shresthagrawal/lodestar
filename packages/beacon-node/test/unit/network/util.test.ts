@@ -3,10 +3,8 @@ import {expect} from "chai";
 import {createSecp256k1PeerId} from "@libp2p/peer-id-factory";
 import {config} from "@lodestar/config/default";
 import {ForkName} from "@lodestar/params";
-import {ENR} from "@chainsafe/discv5";
-import {Method, Version, Encoding} from "../../../src/network/reqresp/types.js";
+import {generateKeypair, KeypairType, SignableENR} from "@chainsafe/discv5";
 import {defaultNetworkOptions} from "../../../src/network/options.js";
-import {formatProtocolId, parseProtocolId} from "../../../src/network/reqresp/utils/index.js";
 import {createNodeJsLibp2p, isLocalMultiAddr} from "../../../src/network/index.js";
 import {getCurrentAndNextFork} from "../../../src/network/forks.js";
 
@@ -20,38 +18,6 @@ describe("Test isLocalMultiAddr", () => {
     const multi0 = multiaddr("/ip4/0.0.0.0/udp/30303");
     expect(isLocalMultiAddr(multi0)).to.equal(false);
   });
-});
-
-describe("ReqResp protocolID parse / render", () => {
-  const testCases: {
-    method: Method;
-    version: Version;
-    encoding: Encoding;
-    protocolId: string;
-  }[] = [
-    {
-      method: Method.Status,
-      version: Version.V1,
-      encoding: Encoding.SSZ_SNAPPY,
-      protocolId: "/eth2/beacon_chain/req/status/1/ssz_snappy",
-    },
-    {
-      method: Method.BeaconBlocksByRange,
-      version: Version.V2,
-      encoding: Encoding.SSZ_SNAPPY,
-      protocolId: "/eth2/beacon_chain/req/beacon_blocks_by_range/2/ssz_snappy",
-    },
-  ];
-
-  for (const {method, encoding, version, protocolId} of testCases) {
-    it(`Should render ${protocolId}`, () => {
-      expect(formatProtocolId(method, version, encoding)).to.equal(protocolId);
-    });
-
-    it(`Should parse ${protocolId}`, () => {
-      expect(parseProtocolId(protocolId)).to.deep.equal({method, version, encoding});
-    });
-  }
 });
 
 describe("getCurrentAndNextFork", function () {
@@ -97,7 +63,7 @@ describe("createNodeJsLibp2p", () => {
         connectToDiscv5Bootnodes: true,
         discv5: {
           enabled: false,
-          enr: new ENR(),
+          enr: SignableENR.createV4(generateKeypair(KeypairType.Secp256k1)),
           bindAddr: "/ip4/127.0.0.1/udp/0",
           bootEnrs: enrWithTcp,
         },
@@ -127,7 +93,7 @@ describe("createNodeJsLibp2p", () => {
         connectToDiscv5Bootnodes: true,
         discv5: {
           enabled: false,
-          enr: new ENR(),
+          enr: SignableENR.createV4(generateKeypair(KeypairType.Secp256k1)),
           bindAddr: "/ip4/127.0.0.1/udp/0",
           bootEnrs: enrWithoutTcp,
         },

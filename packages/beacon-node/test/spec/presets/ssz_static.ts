@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {ssz} from "@lodestar/types";
 import {Type} from "@chainsafe/ssz";
-import {ACTIVE_PRESET, ForkName} from "@lodestar/params";
+import {ACTIVE_PRESET, ForkName, ForkLightClient} from "@lodestar/params";
 import {replaceUintTypeWithUintBigintType} from "../utils/replaceUintTypeWithUintBigintType.js";
 import {parseSszStaticTestcase} from "../utils/sszTestCaseParser.js";
 import {runValidSszTest} from "../utils/runValidSszTest.js";
@@ -17,15 +17,6 @@ import {runValidSszTest} from "../utils/runValidSszTest.js";
 //
 // Docs: https://github.com/ethereum/consensus-specs/blob/master/tests/formats/ssz_static/core.md
 
-/* eslint-disable
-  @typescript-eslint/naming-convention,
-  @typescript-eslint/no-unsafe-assignment,
-  @typescript-eslint/no-unsafe-call,
-  @typescript-eslint/no-unsafe-member-access,
-  no-console
-*/
-
-// eslint-disable-next-line
 type Types = Record<string, Type<any>>;
 
 // Mapping of sszGeneric() fn arguments to the path in spec tests
@@ -35,13 +26,27 @@ type Types = Record<string, Type<any>>;
 // tests / mainnet / altair / ssz_static       / Validator    / ssz_random   / case_0/roots.yaml
 //
 
-export const sszStatic = (fork: ForkName, typeName: string, testSuite: string, testSuiteDirpath: string): void => {
-  if (["LightClientBootstrap", "LightClientFinalityUpdate", "LightClientOptimisticUpdate"].includes(typeName)) {
-    // We don't have sszTypes for these typeNames yet, renable them as we add
+export const sszStatic = (skippedTypes?: string[]) => (
+  fork: ForkName,
+  typeName: string,
+  testSuite: string,
+  testSuiteDirpath: string
+): void => {
+  // Do not manually skip tests here, do it in packages/beacon-node/test/spec/presets/index.test.ts
+  if (skippedTypes?.includes(typeName)) {
     return;
   }
+
   /* eslint-disable @typescript-eslint/strict-boolean-expressions */
-  const sszType = (ssz[fork] as Types)[typeName] || (ssz.altair as Types)[typeName] || (ssz.phase0 as Types)[typeName];
+  const sszType =
+    // Since lightclient types are not updated/declared at all forks, this allForksLightClient
+    // will help us get the right type for lightclient objects
+    ((ssz.allForksLightClient[fork as ForkLightClient] || {}) as Types)[typeName] ||
+    (ssz[fork] as Types)[typeName] ||
+    (ssz.capella as Types)[typeName] ||
+    (ssz.bellatrix as Types)[typeName] ||
+    (ssz.altair as Types)[typeName] ||
+    (ssz.phase0 as Types)[typeName];
   if (!sszType) {
     throw Error(`No type for ${typeName}`);
   }
@@ -49,9 +54,7 @@ export const sszStatic = (fork: ForkName, typeName: string, testSuite: string, t
   const sszTypeNoUint = replaceUintTypeWithUintBigintType(sszType);
 
   for (const testCase of fs.readdirSync(testSuiteDirpath)) {
-    if (testSuiteDirpath.includes("LightClientUpdate")) {
-      continue;
-    }
+    // Do not manually skip tests here, do it in packages/beacon-node/test/spec/presets/index.test.ts
     it(testCase, function () {
       // Mainnet must deal with big full states and hash each one multiple times
       if (ACTIVE_PRESET === "mainnet") {

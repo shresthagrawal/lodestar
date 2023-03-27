@@ -1,10 +1,11 @@
-import {ILogger} from "@lodestar/utils";
-import {allForks, RootHex, Slot, phase0} from "@lodestar/types";
-import {IBeaconConfig} from "@lodestar/config";
+import {Logger} from "@lodestar/utils";
+import {RootHex, Slot, phase0} from "@lodestar/types";
+import {BeaconConfig} from "@lodestar/config";
 import {routes} from "@lodestar/api";
+import {BlockInput} from "../chain/blocks/types.js";
 import {INetwork} from "../network/index.js";
 import {IBeaconChain} from "../chain/index.js";
-import {IMetrics} from "../metrics/index.js";
+import {Metrics} from "../metrics/index.js";
 import {IBeaconDb} from "../db/index.js";
 import {SyncChainDebugState} from "./range/chain.js";
 export {SyncChainDebugState};
@@ -39,21 +40,17 @@ export const syncStateMetric: {[K in SyncState]: number} = {
   [SyncState.Synced]: 3,
 };
 
-export interface ISyncModule {
-  getHighestBlock(): Slot;
-}
-
-export interface ISlotRange {
+export type SlotRange = {
   start: Slot;
   end: Slot;
-}
+};
 
-export interface ISyncModules {
-  config: IBeaconConfig;
+export interface SyncModules {
+  config: BeaconConfig;
   network: INetwork;
   db: IBeaconDb;
-  metrics: IMetrics | null;
-  logger: ILogger;
+  metrics: Metrics | null;
+  logger: Logger;
   chain: IBeaconChain;
   wsCheckpoint?: phase0.Checkpoint;
 }
@@ -61,7 +58,7 @@ export interface ISyncModules {
 export type PendingBlock = {
   blockRootHex: RootHex;
   parentBlockRootHex: RootHex;
-  signedBlock: allForks.SignedBeaconBlock;
+  blockInput: BlockInput;
   peerIdStrs: Set<string>;
   status: PendingBlockStatus;
   downloadAttempts: number;

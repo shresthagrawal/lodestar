@@ -36,58 +36,46 @@ Validators are represented by a BLS keypair. Use your generated mnemonic from on
 
 To import a validator keystore that was created via one of the methods described above, you must locate the validator keystore JSONs exported by those tools (ex. `keystore-m_12381_3600_0_0_0-1654128694.json`).
 
-Inside the keystore JSON file, you should have an [EIP-2335 conformant keystore file](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2335.md#json-schema) such as the example below:
+Inside the keystore JSON file, you should have an [EIP-2335 conformant keystore file](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2335.md#json-schema).
 
-```
-{
-  "crypto": {
-    "kdf": {
-      "function": "scrypt",
-      "params": {
-        "dklen": 32,
-        "n": 262144,
-        "r": 8,
-        "p": 1,
-        "salt": "30bb9ef21d9f1f946c3c7ab70e27f453180a49d473a2a3e79ca2bc715ac4e898"
-      },
-      "message": ""
-    },
-    "checksum": {
-      "function": "sha256",
-      "params": {},
-      "message": "ba3cf1c8ba5be4f90c36bcf44ee37a779eac8c54b72121e4755b6722e95164a7"
-    },
-    "cipher": {
-      "function": "aes-128-ctr",
-      "params": {
-        "iv": "90f76d9d4d1b089e89802eac2f80b6b7"
-      },
-      "message": "8de2b0f55da54719822db6c083f0436ff94cd638be96c57b91339b438e9355f6"
-    }
-  },
-  "description": "",
-  "pubkey": "b22690ca679edd5fb9c2545f358da1427b8310e8ccf9e7e4f01ddce9b1d711a0362d35225673cce8f33911a22ae1519e",
-  "path": "m/12381/3600/0/0/0",
-  "uuid": "de83e8dc-8f95-4ea0-b9ba-cfa608ff3483",
-  "version": 4
-}
-```
+You will also need the passphrase used the encrypt the keystore. This can be specified interactively, or provided in a plaintext file.
 
-These keystore files should be placed into your `./keystores` folder in your Lodestar directory.
+#### Option 1: Import Keys To Lodestar's Keystores Folder
+
+You can load the keys into the keystore folder using the `validator import` command. There are two methods for importing keystores:
+```bash
+# Interactive passphrase import
+./lodestar validator import --importKeystores ./validator_keys
+
+# Plaintext passphrase file import
+./lodestar validator import --importKeystores ./validator_keys --importKeystoresPassword ./password.txt
+```
 
 <!-- prettier-ignore-start -->
 !!! info
-    The `./keystores` folder is the default directory for storing validator keystores. You can specify a custom path using the `--keystoresDir /path/to/folder` flag. Reference our [validator command line](https://chainsafe.github.io/lodestar/reference/cli/#validator) for more information.
+    The interactive passphrase import method will prompt every keystore in the `validator_keys` folder for import and will ask for the individual password for each keystore. **This method will allow you to import multiple keystores with different passwords.**
+
+    The plaintext passphrase file import method will allow  to import all keystores in the `validator_keys` folder with the same password contained in `password.txt` for efficiency. 
 <!-- prettier-ignore-end -->
 
-Create a `password.txt` file with the password you set for your keystores and save it into your `./secrets` folder in your Lodestar directory.
+Once imported with either method, these keystores will be automatically loaded when you start the validator. To list the imported keystores, use the `validator list` command.
 
-### Configuring the fee recipient address
+---
+#### Option 2: Import Keys When Starting the Validator
+
+To import keys when you start the validator specify the `--importKeystores` and `--importKeystoresPassword` flags with the `validator` command:
+
+```bash
+./lodestar validator --importKeystores ./validator_keys --importKeystoresPassword ./password.txt
+```
 
 <!-- prettier-ignore-start -->
 !!! warning
-    This feature is in review. Please use with caution and report any issues to the team through our [Discord](https://discord.gg/yjyvFRP).
+    If you import keys using `--importKeystores` at runtime (Option 2) any keys loaded to the keystores folder from Option 1 will be ignored.
 <!-- prettier-ignore-end -->
+
+
+### Configuring the fee recipient address
 
 Post-Merge Ethereum requires validators to set a **Fee Recipient** which allows you to receive priority fees when proposing blocks. If you do not set this address, your priority fees will be sent to the [burn address](https://etherscan.io/address/0x0000000000000000000000000000000000000000).
 
@@ -97,7 +85,9 @@ You may choose to use the `--strictFeeRecipientCheck` flag to enable a strict ch
 
 ### Submit a validator deposit
 
-DEPRECATED. Please use the official tools to perform your deposits - `staking-deposit-cli`: https://github.com/ethereum/staking-deposit-cli - Ethereum Foundation launchpad: https://launchpad.ethereum.org/en/
+Please use the official tools to perform your deposits
+- `staking-deposit-cli`: <https://github.com/ethereum/staking-deposit-cli>
+- Ethereum Foundation launchpad: <https://launchpad.ethereum.org>
 
 ## Run the validator
 
@@ -110,10 +100,19 @@ To start a Lodestar validator run the command:
 You should see confirmation that modules have started.
 
 ```bash
-2020-08-07 14:14:24  []                 info: Decrypted 2 validator keystores
-2020-08-07 14:14:24  [VALIDATOR 0X8BAC4815] info: Setting up validator client...
-2020-08-07 14:14:24  [VALIDATOR 0X8BAC4815] info: Setting up RPC connection...
-2020-08-07 14:14:24  []                 info: Checking genesis time and beacon node connection
-2020-08-07 14:14:24  [VALIDATOR 0X8E44237B] info: Setting up validator client...
-2020-08-07 14:14:24  [VALIDATOR 0X8E44237B] info: Setting up RPC connection...
+Nov-29 10:47:13.647[]                 info: Lodestar network=sepolia, version=v1.2.2/f093b46, commit=f093b468ec3ab0dbbe8e2d2c8175f52ad88aa35f
+Nov-29 10:47:13.649[]                 info: Connecting to LevelDB database path=/home/user/.local/share/lodestar/sepolia/validator-db
+Nov-29 10:47:51.732[]                 info: 3 local keystores
+Nov-29 10:47:51.735[]                 info: 0x800f6be579b31ea950a50be65f7de8f678b23b7466579c01ac26ebf9c19599fb2b446da40ad4fc92c6109fcd6793303f
+Nov-29 10:47:51.735[]                 info: 0x81337ebe90d6942d8b61922ea880c4d28ebc745ddc10a1acc85b745a15c6c8754af1a73b1b3483b6a5024b783510b35c
+Nov-29 10:47:51.757[]                 info: 0xb95fc0ec39596deee2c4363f57bb4786f5bb8dfb345c1e5b14e2927be482615971d0d81f9a88b3389fac7079b3cb2f46
+Nov-29 10:47:51.776[]                 info: Genesis fetched from the beacon node
+Nov-29 10:47:51.781[]                 info: Verified connected beacon node and validator have same the config
+Nov-29 10:47:51.837[]                 info: Verified connected beacon node and validator have the same genesisValidatorRoot
+Nov-29 10:47:51.914[]                 info: Discovered new validators count=100
+Nov-29 10:48:00.197[]                 info: Published SyncCommitteeMessage slot=1165140, count=27
+Nov-29 10:48:02.296[]                 info: Published attestations slot=1165140, count=6
+Nov-29 10:48:08.122[]                 info: Published aggregateAndProofs slot=1165140, index=0, count=2
+Nov-29 10:48:12.102[]                 info: Published SyncCommitteeMessage slot=1165141, count=27
+Nov-29 10:48:14.236[]                 info: Published attestations slot=1165141, count=4
 ```

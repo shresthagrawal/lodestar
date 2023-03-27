@@ -1,18 +1,20 @@
 import {BeaconPreset} from "@lodestar/params";
-import {IChainConfig} from "@lodestar/config";
+import {ChainConfig} from "@lodestar/config";
 import {Bytes32, UintNum64, phase0, ssz} from "@lodestar/types";
 import {mapValues} from "@lodestar/utils";
 import {ByteVectorType, ContainerType} from "@chainsafe/ssz";
 import {
   ArrayOf,
-  ContainerData,
   ReqEmpty,
   reqEmpty,
   ReturnTypes,
   ReqSerializers,
   RoutesData,
   sameType,
+  ContainerData,
 } from "../../utils/index.js";
+import {HttpStatusCode} from "../../utils/client/httpStatusCode.js";
+import {ApiClientResponse} from "../../interfaces.js";
 
 // See /packages/api/src/routes/index.ts for reasoning and instructions to add new routes
 
@@ -21,20 +23,20 @@ export type DepositContract = {
   address: Bytes32;
 };
 
-export type Spec = BeaconPreset & IChainConfig;
+export type Spec = BeaconPreset & ChainConfig;
 
 export type Api = {
   /**
    * Get deposit contract address.
    * Retrieve Eth1 deposit contract address and chain ID.
    */
-  getDepositContract(): Promise<{data: DepositContract}>;
+  getDepositContract(): Promise<ApiClientResponse<{[HttpStatusCode.OK]: {data: DepositContract}}>>;
 
   /**
    * Get scheduled upcoming forks.
    * Retrieve all scheduled upcoming forks this node is aware of.
    */
-  getForkSchedule(): Promise<{data: phase0.Fork[]}>;
+  getForkSchedule(): Promise<ApiClientResponse<{[HttpStatusCode.OK]: {data: phase0.Fork[]}}>>;
 
   /**
    * Retrieve specification configuration used on this node.  The configuration should include:
@@ -46,7 +48,7 @@ export type Api = {
    * - any value starting with 0x in the spec is returned as a hex string
    * - numeric values are returned as a quoted integer
    */
-  getSpec(): Promise<{data: Record<string, string>}>;
+  getSpec(): Promise<ApiClientResponse<{[HttpStatusCode.OK]: {data: Record<string, string>}}>>;
 };
 
 /**

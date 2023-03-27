@@ -1,12 +1,12 @@
 import type {SecretKey} from "@chainsafe/bls/types";
-import {getClient} from "@lodestar/api";
+import {ApiError, getClient} from "@lodestar/api";
 import {phase0, ssz} from "@lodestar/types";
 import {config as chainConfig} from "@lodestar/config/default";
-import {createIBeaconConfig, IBeaconConfig} from "@lodestar/config";
+import {createBeaconConfig, BeaconConfig} from "@lodestar/config";
 import {DOMAIN_BEACON_PROPOSER} from "@lodestar/params";
 import {toHexString} from "@lodestar/utils";
 import {computeSigningRoot} from "@lodestar/state-transition";
-import {ICliCommand} from "../util/command.js";
+import {CliCommand} from "../util/command.js";
 import {deriveSecretKeys, SecretKeysArgs, secretKeysOptions} from "../util/deriveSecretKeys.js";
 
 /* eslint-disable no-console */
@@ -17,7 +17,7 @@ type SelfSlashArgs = SecretKeysArgs & {
   batchSize: string;
 };
 
-export const selfSlashProposer: ICliCommand<SelfSlashArgs, Record<never, never>, void> = {
+export const selfSlashProposer: CliCommand<SelfSlashArgs, Record<never, never>, void> = {
   command: "self-slash-proposer",
   describe: "Self slash validators of a provided mnemonic with ProposerSlashing",
   examples: [
@@ -61,8 +61,9 @@ export async function selfSlashProposerHandler(args: SelfSlashArgs): Promise<voi
   const client = getClient({baseUrl: args.server}, {config: chainConfig});
 
   // Get genesis data to perform correct signatures
-  const {data: genesis} = await client.beacon.getGenesis();
-  const config = createIBeaconConfig(chainConfig, genesis.genesisValidatorsRoot);
+  const res = await client.beacon.getGenesis();
+  ApiError.assert(res, "Can not fetch genesis data from beacon node");
+  const config = createBeaconConfig(chainConfig, res.response.data.genesisValidatorsRoot);
 
   // TODO: Allow to customize the ProposerSlashing payloads
 
@@ -78,7 +79,9 @@ export async function selfSlashProposerHandler(args: SelfSlashArgs): Promise<voi
 
     // Retrieve the status all all validators in range at once
     const pksHex = sks.map((sk) => sk.toPublicKey().toHex());
-    const {data: validators} = await client.beacon.getStateValidators("head", {id: pksHex});
+    const res = await client.beacon.getStateValidators("head", {id: pksHex});
+    ApiError.assert(res, "Can not fetch state validators from beacon node");
+    const validators = res.response.data;
 
     // Submit all ProposerSlashing for range at once
     await Promise.all(
@@ -122,7 +125,7 @@ export async function selfSlashProposerHandler(args: SelfSlashArgs): Promise<voi
             },
           };
 
-          await client.beacon.submitPoolProposerSlashings(proposerSlashing);
+          ApiError.assert(await client.beacon.submitPoolProposerSlashings(proposerSlashing));
 
           console.log(`Submitted self ProposerSlashing for validator ${index} - ${++successCount}/${totalCount}`);
         } catch (e) {
@@ -133,7 +136,7 @@ export async function selfSlashProposerHandler(args: SelfSlashArgs): Promise<voi
   }
 }
 
-function signHeaderBigint(config: IBeaconConfig, sk: SecretKey, header: phase0.BeaconBlockHeaderBigint): Uint8Array {
+function signHeaderBigint(config: BeaconConfig, sk: SecretKey, header: phase0.BeaconBlockHeaderBigint): Uint8Array {
   const slot = Number(header.slot as bigint);
   const proposerDomain = config.getDomain(slot, DOMAIN_BEACON_PROPOSER);
   const signingRoot = computeSigningRoot(ssz.phase0.BeaconBlockHeaderBigint, header, proposerDomain);

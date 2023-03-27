@@ -2,12 +2,12 @@ import {allForks} from "@lodestar/types";
 import {RegistryMetricCreator} from "../utils/registryMetricCreator.js";
 import {LodestarMetadata} from "../options.js";
 
-export type ILodestarMetrics = ReturnType<typeof createLodestarMetrics>;
+export type LodestarMetrics = ReturnType<typeof createLodestarMetrics>;
 
 /**
  * Extra Lodestar custom metrics
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/explicit-function-return-type
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function createLodestarMetrics(
   register: RegistryMetricCreator,
   metadata?: LodestarMetadata,
@@ -49,11 +49,12 @@ export function createLodestarMetrics(
       help: "Histogram of current count of long lived attnets of connected peers",
       buckets: [0, 4, 16, 32, 64],
     }),
-    peerScore: register.histogram({
+    peerScoreByClient: register.histogram<"client">({
       name: "lodestar_app_peer_score",
       help: "Current peer score at lodestar app side",
       // Min score = -100, max score = 100, disconnect = -20, ban = -50
       buckets: [-100, -50, -20, 0, 25],
+      labelNames: ["client"],
     }),
     peerConnectionLength: register.histogram({
       name: "lodestar_peer_connection_seconds",
@@ -66,10 +67,10 @@ export function createLodestarMetrics(
       name: "lodestar_peers_sync_count",
       help: "Current count of peers useful for sync",
     }),
-    peerConnectedEvent: register.gauge<"direction">({
+    peerConnectedEvent: register.gauge<"direction" | "status">({
       name: "lodestar_peer_connected_total",
       help: "Total number of peer:connected event, labeled by direction",
-      labelNames: ["direction"],
+      labelNames: ["direction", "status"],
     }),
     peerDisconnectedEvent: register.gauge<"direction">({
       name: "lodestar_peer_disconnected_total",
@@ -93,21 +94,21 @@ export function createLodestarMetrics(
     }),
     peersRequestedToConnect: register.gauge({
       name: "lodestar_peers_requested_total_to_connect",
-      help: "Priorization results total peers count requested to connect",
+      help: "Prioritization results total peers count requested to connect",
     }),
     peersRequestedToDisconnect: register.gauge<"reason">({
       name: "lodestar_peers_requested_total_to_disconnect",
-      help: "Priorization results total peers count requested to disconnect",
+      help: "Prioritization results total peers count requested to disconnect",
       labelNames: ["reason"],
     }),
     peersRequestedSubnetsToQuery: register.gauge<"type">({
       name: "lodestar_peers_requested_total_subnets_to_query",
-      help: "Priorization results total subnets to query and discover peers in",
+      help: "Prioritization results total subnets to query and discover peers in",
       labelNames: ["type"],
     }),
     peersRequestedSubnetsPeerCount: register.gauge<"type">({
       name: "lodestar_peers_requested_total_subnets_peers_count",
-      help: "Priorization results total peers in subnets to query and discover peers in",
+      help: "Prioritization results total peers in subnets to query and discover peers in",
       labelNames: ["type"],
     }),
     peersReportPeerCount: register.gauge<"reason">({
@@ -163,45 +164,23 @@ export function createLodestarMetrics(
       }),
     },
 
-    discv5: {
-      kadTableSize: register.gauge({
-        name: "lodestar_discv5_kad_table_size",
-        help: "Total size of the discv5 kad table",
-      }),
-      lookupCount: register.gauge({
-        name: "lodestar_discv5_lookup_count",
-        help: "Total count of discv5 lookups",
-      }),
-      activeSessionCount: register.gauge({
-        name: "lodestar_discv5_active_session_count",
-        help: "Count of the discv5 active sessions",
-      }),
-      connectedPeerCount: register.gauge({
-        name: "lodestar_discv5_connected_peer_count",
-        help: "Count of the discv5 connected peers",
-      }),
-      sentMessageCount: register.gauge<"type">({
-        name: "lodestar_discv5_sent_message_count",
-        help: "Count of the discv5 messages sent by message type",
-        labelNames: ["type"],
-      }),
-      rcvdMessageCount: register.gauge<"type">({
-        name: "lodestar_discv5_rcvd_message_count",
-        help: "Count of the discv5 messages received by message type",
-        labelNames: ["type"],
-      }),
-    },
-
     gossipPeer: {
       scoreByThreshold: register.gauge<"threshold">({
         name: "lodestar_gossip_peer_score_by_threshold_count",
-        help: "Gossip peer score by threashold",
+        help: "Gossip peer score by threshold",
         labelNames: ["threshold"],
       }),
       meshPeersByClient: register.gauge<"client">({
         name: "lodestar_gossip_mesh_peers_by_client_count",
         help: "number of mesh peers, labeled by client",
         labelNames: ["client"],
+      }),
+      scoreByClient: register.histogram<"client">({
+        name: "lodestar_gossip_score_by_client",
+        help: "Gossip peer score by client",
+        labelNames: ["client"],
+        // based on gossipScoreThresholds and negativeGossipScoreIgnoreThreshold
+        buckets: [-16000, -8000, -4000, -1000, 0, 5, 100],
       }),
       score: register.avgMinMax({
         name: "lodestar_gossip_score_avg_min_max",
@@ -278,13 +257,72 @@ export function createLodestarMetrics(
       name: "lodestar_gossip_validation_queue_job_time_seconds",
       help: "Time to process gossip validation queue job in seconds",
       labelNames: ["topic"],
+      buckets: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10],
     }),
     gossipValidationQueueJobWaitTime: register.histogram<"topic">({
       name: "lodestar_gossip_validation_queue_job_wait_time_seconds",
       help: "Time from job added to the queue to starting the job in seconds",
       labelNames: ["topic"],
-      buckets: [0.1, 1, 10, 100],
+      buckets: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10],
     }),
+    gossipValidationQueueConcurrency: register.gauge<"topic">({
+      name: "lodestar_gossip_validation_queue_concurrency",
+      help: "Current concurrency of gossip validation queue",
+      labelNames: ["topic"],
+    }),
+
+    discv5: {
+      decodeEnrAttemptCount: register.counter({
+        name: "lodestar_discv5_decode_enr_attempt_count",
+        help: "Count of total attempts to decode enrs",
+      }),
+      decodeEnrErrorCount: register.counter({
+        name: "lodestar_discv5_decode_enr_error_count",
+        help: "Count of total errors attempting to decode enrs",
+      }),
+    },
+
+    attnetsService: {
+      committeeSubnets: register.gauge({
+        name: "lodestar_attnets_service_committee_subnets_total",
+        help: "Count of committee subnets",
+      }),
+      subscriptionsCommittee: register.gauge({
+        name: "lodestar_attnets_service_committee_subscriptions_total",
+        help: "Count of committee subscriptions",
+      }),
+      subscriptionsRandom: register.gauge({
+        name: "lodestar_attnets_service_random_subscriptions_total",
+        help: "Count of random subscriptions",
+      }),
+      subscribeSubnets: register.gauge<"subnet" | "src">({
+        name: "lodestar_attnets_service_subscribe_subnets_total",
+        help: "Count of subscribe_subnets calls",
+        labelNames: ["subnet", "src"],
+      }),
+      unsubscribeSubnets: register.gauge<"subnet" | "src">({
+        name: "lodestar_attnets_service_unsubscribe_subnets_total",
+        help: "Count of unsubscribe_subnets calls",
+        labelNames: ["subnet", "src"],
+      }),
+    },
+
+    syncnetsService: {
+      subscriptionsCommittee: register.gauge({
+        name: "lodestar_syncnets_service_committee_subscriptions_total",
+        help: "Count of syncnet committee subscriptions",
+      }),
+      subscribeSubnets: register.gauge<"subnet">({
+        name: "lodestar_syncnets_service_subscribe_subnets_total",
+        help: "Count of syncnet subscribe_subnets calls",
+        labelNames: ["subnet"],
+      }),
+      unsubscribeSubnets: register.gauge<"subnet">({
+        name: "lodestar_syncnets_service_unsubscribe_subnets_total",
+        help: "Count of syncnet unsubscribe_subnets calls",
+        labelNames: ["subnet"],
+      }),
+    },
 
     regenQueue: {
       length: register.gauge({
@@ -298,12 +336,16 @@ export function createLodestarMetrics(
       jobTime: register.histogram({
         name: "lodestar_regen_queue_job_time_seconds",
         help: "Time to process regen queue job in seconds",
-        buckets: [0.1, 1, 10, 100],
+        buckets: [0.01, 0.1, 1, 10, 100],
       }),
       jobWaitTime: register.histogram({
         name: "lodestar_regen_queue_job_wait_time_seconds",
         help: "Time from job added to the regen queue to starting in seconds",
-        buckets: [0.1, 1, 10, 100],
+        buckets: [0.01, 0.1, 1, 10, 100],
+      }),
+      concurrency: register.gauge({
+        name: "lodestar_regen_queue_concurrency",
+        help: "Current concurrency of regen queue",
       }),
     },
 
@@ -319,12 +361,16 @@ export function createLodestarMetrics(
       jobTime: register.histogram({
         name: "lodestar_block_processor_queue_job_time_seconds",
         help: "Time to process block processor queue job in seconds",
-        buckets: [0.1, 1, 10, 100],
+        buckets: [0.01, 0.1, 1, 10, 100],
       }),
       jobWaitTime: register.histogram({
         name: "lodestar_block_processor_queue_job_wait_time_seconds",
         help: "Time from job added to the block processor queue to starting in seconds",
-        buckets: [0.1, 1, 10, 100],
+        buckets: [0.01, 0.1, 1, 10, 100],
+      }),
+      concurrency: register.gauge({
+        name: "lodestar_block_processor_queue_concurrency",
+        help: "Current concurrency of block processor queue",
       }),
     },
 
@@ -349,12 +395,16 @@ export function createLodestarMetrics(
         // Ideally it should be picked up < 100 of ms and could run upto 100 of secs
         buckets: [0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1, 2, 5, 10, 25, 50, 100],
       }),
+      concurrency: register.gauge({
+        name: "lodestar_engine_http_processor_queue_concurrency_total",
+        help: "Current concurrency of engine http processor queue",
+      }),
     },
 
     apiRest: {
       responseTime: register.histogram<"operationId">({
         name: "lodestar_api_rest_response_time_seconds",
-        help: "REST API time to fullfill a request by operationId",
+        help: "REST API time to fulfill a request by operationId",
         labelNames: ["operationId"],
         // Request times range between 1ms to 100ms in normal conditions. Can get to 1-5 seconds if overloaded
         buckets: [0.01, 0.1, 1],
@@ -386,18 +436,74 @@ export function createLodestarMetrics(
 
     // Beacon state transition metrics
 
-    stfnEpochTransition: register.histogram({
+    epochTransitionTime: register.histogram({
       name: "lodestar_stfn_epoch_transition_seconds",
       help: "Time to process a single epoch transition in seconds",
       // Epoch transitions are 100ms on very fast clients, and average 800ms on heavy networks
       buckets: [0.01, 0.05, 0.1, 0.2, 0.5, 0.75, 1, 1.25, 1.5, 3, 10],
     }),
-    stfnProcessBlock: register.histogram({
+    epochTransitionCommitTime: register.histogram({
+      name: "lodestar_stfn_epoch_transition_commit_seconds",
+      help: "Time to call commit after process a single epoch transition in seconds",
+      buckets: [0.01, 0.05, 0.1, 0.2, 0.5, 0.75, 1],
+    }),
+    processBlockTime: register.histogram({
       name: "lodestar_stfn_process_block_seconds",
       help: "Time to process a single block in seconds",
       // TODO: Add metrics for each step
       // Block processing can take 5-40ms, 100ms max
       buckets: [0.005, 0.01, 0.02, 0.05, 0.1, 1],
+    }),
+    processBlockCommitTime: register.histogram({
+      name: "lodestar_stfn_process_block_commit_seconds",
+      help: "Time to call commit after process a single block in seconds",
+      buckets: [0.005, 0.01, 0.02, 0.05, 0.1, 1],
+    }),
+    stateHashTreeRootTime: register.histogram({
+      name: "lodestar_stfn_hash_tree_root_seconds",
+      help: "Time to compute the hash tree root of a post state in seconds",
+      buckets: [0.005, 0.01, 0.02, 0.05, 0.1, 1],
+    }),
+    preStateBalancesNodesPopulatedMiss: register.gauge<"source">({
+      name: "lodestar_stfn_balances_nodes_populated_miss_total",
+      help: "Total count state.balances nodesPopulated is false on stfn",
+      labelNames: ["source"],
+    }),
+    preStateBalancesNodesPopulatedHit: register.gauge<"source">({
+      name: "lodestar_stfn_balances_nodes_populated_hit_total",
+      help: "Total count state.balances nodesPopulated is true on stfn",
+      labelNames: ["source"],
+    }),
+    preStateValidatorsNodesPopulatedMiss: register.gauge<"source">({
+      name: "lodestar_stfn_validators_nodes_populated_miss_total",
+      help: "Total count state.validators nodesPopulated is false on stfn",
+      labelNames: ["source"],
+    }),
+    preStateValidatorsNodesPopulatedHit: register.gauge<"source">({
+      name: "lodestar_stfn_validators_nodes_populated_hit_total",
+      help: "Total count state.validators nodesPopulated is true on stfn",
+      labelNames: ["source"],
+    }),
+    preStateClonedCount: register.histogram({
+      name: "lodestar_stfn_state_cloned_count",
+      help: "Histogram of cloned count per state every time state.clone() is called",
+      buckets: [1, 2, 5, 10, 50, 250],
+    }),
+    postStateBalancesNodesPopulatedHit: register.gauge({
+      name: "lodestar_stfn_post_state_balances_nodes_populated_hit_total",
+      help: "Total count state.validators nodesPopulated is true on stfn for post state",
+    }),
+    postStateBalancesNodesPopulatedMiss: register.gauge({
+      name: "lodestar_stfn_post_state_balances_nodes_populated_miss_total",
+      help: "Total count state.validators nodesPopulated is false on stfn for post state",
+    }),
+    postStateValidatorsNodesPopulatedHit: register.gauge({
+      name: "lodestar_stfn_post_state_validators_nodes_populated_hit_total",
+      help: "Total count state.validators nodesPopulated is true on stfn for post state",
+    }),
+    postStateValidatorsNodesPopulatedMiss: register.gauge({
+      name: "lodestar_stfn_post_state_validators_nodes_populated_miss_total",
+      help: "Total count state.validators nodesPopulated is false on stfn for post state",
     }),
 
     // BLS verifier thread pool and queue
@@ -426,7 +532,7 @@ export function createLodestarMetrics(
       jobWaitTime: register.histogram({
         name: "lodestar_bls_thread_pool_queue_job_wait_time_seconds",
         help: "Time from job added to the queue to starting the job in seconds",
-        buckets: [0.1, 1, 10],
+        buckets: [0.01, 0.02, 0.5, 0.1, 0.3, 1],
       }),
       queueLength: register.gauge({
         name: "lodestar_bls_thread_pool_queue_length",
@@ -572,22 +678,51 @@ export function createLodestarMetrics(
     // Gossip block
     gossipBlock: {
       elapsedTimeTillReceived: register.histogram({
-        name: "lodestar_gossip_block_elappsed_time_till_received",
-        help: "Time elappsed between block slot time and the time block received via gossip",
+        name: "lodestar_gossip_block_elapsed_time_till_received",
+        help: "Time elapsed between block slot time and the time block received via gossip",
         buckets: [0.5, 1, 2, 4, 6, 12],
       }),
       elapsedTimeTillProcessed: register.histogram({
-        name: "lodestar_gossip_block_elappsed_time_till_processed",
-        help: "Time elappsed between block slot time and the time block processed",
+        name: "lodestar_gossip_block_elapsed_time_till_processed",
+        help: "Time elapsed between block slot time and the time block processed",
         buckets: [0.5, 1, 2, 4, 6, 12],
+      }),
+      receivedToGossipValidate: register.histogram({
+        name: "lodestar_gossip_block_received_to_gossip_validate",
+        help: "Time elapsed between block received and block validated",
+        buckets: [0.05, 0.1, 0.2, 0.5, 1, 1.5, 2, 4],
+      }),
+      receivedToStateTransition: register.histogram({
+        name: "lodestar_gossip_block_received_to_state_transition",
+        help: "Time elapsed between block received and block state transition",
+        buckets: [0.05, 0.1, 0.2, 0.5, 1, 1.5, 2, 4],
+      }),
+      receivedToSignaturesVerification: register.histogram({
+        name: "lodestar_gossip_block_received_to_signatures_verification",
+        help: "Time elapsed between block received and block signatures verification",
+        buckets: [0.05, 0.1, 0.2, 0.5, 1, 1.5, 2, 4],
+      }),
+      receivedToExecutionPayloadVerification: register.histogram({
+        name: "lodestar_gossip_block_received_to_execution_payload_verification",
+        help: "Time elapsed between block received and execution payload verification",
+        buckets: [0.05, 0.1, 0.2, 0.5, 1, 1.5, 2, 4],
+      }),
+      receivedToBlockImport: register.histogram({
+        name: "lodestar_gossip_block_received_to_block_import",
+        help: "Time elapsed between block received and block import",
+        buckets: [0.05, 0.1, 0.2, 0.5, 1, 1.5, 2, 4],
       }),
     },
     elapsedTimeTillBecomeHead: register.histogram({
       name: "lodestar_gossip_block_elapsed_time_till_become_head",
-      help: "Time elappsed between block slot time and the time block becomes head",
+      help: "Time elapsed between block slot time and the time block becomes head",
       buckets: [0.5, 1, 2, 4, 6, 12],
     }),
-
+    engineNotifyNewPayloadResult: register.gauge<"result">({
+      name: "lodestar_execution_engine_notify_new_payload_result_total",
+      help: "The total result of calling notifyNewPayload execution engine api",
+      labelNames: ["result"],
+    }),
     backfillSync: {
       backfilledTillSlot: register.gauge({
         name: "lodestar_backfill_till_slot",
@@ -645,6 +780,10 @@ export function createLodestarMetrics(
         name: "lodestar_oppool_voluntary_exit_pool_size",
         help: "Current size of the VoluntaryExitPool",
       }),
+      blsToExecutionChangePoolSize: register.gauge({
+        name: "lodestar_oppool_bls_to_execution_change_pool_size",
+        help: "Current size of the blsToExecutionChangePool",
+      }),
       syncCommitteeMessagePoolSize: register.gauge({
         name: "lodestar_oppool_sync_committee_message_pool_size",
         help: "Current size of the SyncCommitteeMessagePool unique by slot subnet and block root",
@@ -661,7 +800,11 @@ export function createLodestarMetrics(
       validatorsConnected: register.gauge({
         name: "validator_monitor_validators",
         help: "Count of validators that are specifically monitored by this beacon node",
-        labelNames: ["index"],
+      }),
+
+      validatorsInSyncCommittee: register.gauge({
+        name: "validator_monitor_validators_in_sync_committee",
+        help: "Count of validators monitored by this beacon node that are part of sync committee",
       }),
 
       // Validator Monitor Metrics (per-epoch summaries)
@@ -765,6 +908,19 @@ export function createLodestarMetrics(
         help: "The min delay between when the validator should send the aggregate and when it was received",
         buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10],
       }),
+      prevEpochSyncCommitteeHits: register.gauge({
+        name: "validator_monitor_prev_epoch_sync_committee_hits",
+        help: "Count of times in prev epoch connected validators participated in imported block's syncAggregate",
+      }),
+      prevEpochSyncCommitteeMisses: register.gauge({
+        name: "validator_monitor_prev_epoch_sync_committee_misses",
+        help: "Count of times in prev epoch connected validators fail to participate in imported block's syncAggregate",
+      }),
+      prevEpochSyncSignatureAggregateInclusions: register.histogram({
+        name: "validator_monitor_prev_epoch_sync_signature_aggregate_inclusions",
+        help: "The count of times a sync signature was seen inside an aggregate",
+        buckets: [0, 1, 2, 3, 5, 10],
+      }),
 
       // Validator Monitor Metrics (real-time)
 
@@ -780,7 +936,7 @@ export function createLodestarMetrics(
         buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10],
       }),
       unaggregatedAttestationSubmittedSentPeers: register.histogram({
-        name: "validator_monitor_unaggregated_attestation_submited_sent_peers_count",
+        name: "validator_monitor_unaggregated_attestation_submitted_sent_peers_count",
         help: "Number of peers that an unaggregated attestation sent to",
         // as of Apr 2022, most of the time we sent to >30 peers per attestations
         // these bucket values just base on that fact to get equal range
@@ -818,6 +974,10 @@ export function createLodestarMetrics(
         help: "The excess slots (beyond the minimum delay) between the attestation slot and the block slot",
         buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10],
       }),
+      syncSignatureInAggregateTotal: register.gauge({
+        name: "validator_monitor_sync_signature_in_aggregate_total",
+        help: "Number of times a sync signature has been seen in an aggregate",
+      }),
       beaconBlockTotal: register.gauge<"src">({
         name: "validator_monitor_beacon_block_total",
         help: "Total number of beacon blocks seen",
@@ -827,7 +987,8 @@ export function createLodestarMetrics(
         name: "validator_monitor_beacon_block_delay_seconds",
         help: "The delay between when the validator should send the block and when it was received",
         labelNames: ["src"],
-        buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10],
+        // we also want other nodes to received our published before 4s so add bucket 3 and 3.5
+        buckets: [0.1, 0.25, 0.5, 1, 2, 3, 4, 6, 10],
       }),
 
       // Only for known
@@ -873,13 +1034,9 @@ export function createLodestarMetrics(
         help: "Avg min max of all state cache items seconds since last reads",
       }),
       stateClonedCount: register.histogram({
-        name: "lodestar_state_cache_state_cloned_clount",
+        name: "lodestar_state_cache_state_cloned_count",
         help: "Histogram of cloned count per state every time state.clone() is called",
         buckets: [1, 2, 5, 10, 50, 250],
-      }),
-      stateInternalCacheMiss: register.gauge({
-        name: "lodestar_state_cache_state_internal_cache_miss",
-        help: "Retrieved state does not have its internal cache populated",
       }),
     },
 
@@ -913,13 +1070,9 @@ export function createLodestarMetrics(
         help: "Avg min max of all state cache items seconds since last reads",
       }),
       stateClonedCount: register.histogram({
-        name: "lodestar_cp_state_cache_state_cloned_clount",
+        name: "lodestar_cp_state_cache_state_cloned_count",
         help: "Histogram of cloned count per state every time state.clone() is called",
         buckets: [1, 2, 5, 10, 50, 250],
-      }),
-      stateInternalCacheMiss: register.gauge({
-        name: "lodestar_cp_state_cache_state_internal_cache_miss",
-        help: "Retrieved state does not have its internal cache populated",
       }),
     },
 
@@ -929,7 +1082,7 @@ export function createLodestarMetrics(
         help: "Total number of balances cache requests",
       }),
       misses: register.counter({
-        name: "lodestar_balances_cache_missess_total",
+        name: "lodestar_balances_cache_misses_total",
         help: "Total number of balances cache misses",
       }),
       closestStateResult: register.counter<"stateId">({
@@ -993,9 +1146,9 @@ export function createLodestarMetrics(
       help: "regen function total errors",
       labelNames: ["entrypoint", "caller"],
     }),
-    unhandeledPromiseRejections: register.gauge({
-      name: "lodestar_unhandeled_promise_rejections_total",
-      help: "UnhandeledPromiseRejection total count",
+    unhandledPromiseRejections: register.gauge({
+      name: "lodestar_unhandled_promise_rejections_total",
+      help: "UnhandledPromiseRejection total count",
     }),
 
     // Precompute next epoch transition
@@ -1047,7 +1200,7 @@ export function createLodestarMetrics(
         labelNames: ["event"],
       }),
       highestSlot: register.gauge<"item">({
-        name: "lodestar_lightclient_server_higest_slot",
+        name: "lodestar_lightclient_server_highest_slot",
         help: "Current highest slot of items stored by LightclientServer",
         labelNames: ["item"],
       }),
@@ -1172,6 +1325,13 @@ export function createLodestarMetrics(
         // Provide max resolution on problematic values around 1 second
         buckets: [0.1, 0.5, 1, 2, 5, 15],
       }),
+      streamTime: register.histogram<"routeId">({
+        name: "lodestar_eth1_http_client_stream_time_seconds",
+        help: "eth1 JsonHttpClient - streaming time by routeId",
+        labelNames: ["routeId"],
+        // Provide max resolution on problematic values around 1 second
+        buckets: [0.1, 0.5, 1, 2, 5, 15],
+      }),
       requestErrors: register.gauge<"routeId">({
         name: "lodestar_eth1_http_client_request_errors_total",
         help: "eth1 JsonHttpClient - total count of request errors",
@@ -1206,6 +1366,13 @@ export function createLodestarMetrics(
         // Provide max resolution on problematic values around 1 second
         buckets: [0.1, 0.5, 1, 2, 5, 15],
       }),
+      streamTime: register.histogram<"routeId">({
+        name: "lodestar_execution_engine_http_client_stream_time_seconds",
+        help: "ExecutionEngineHttp client - streaming time by routeId",
+        labelNames: ["routeId"],
+        // Provide max resolution on problematic values around 1 second
+        buckets: [0.1, 0.5, 1, 2, 5, 15],
+      }),
       requestErrors: register.gauge<"routeId">({
         name: "lodestar_execution_engine_http_client_request_errors_total",
         help: "ExecutionEngineHttp client - total count of request errors",
@@ -1232,6 +1399,39 @@ export function createLodestarMetrics(
       }),
     },
 
+    builderHttpClient: {
+      requestTime: register.histogram<"routeId">({
+        name: "lodestar_builder_http_client_request_time_seconds",
+        help: "Histogram of builder http client request time by routeId",
+        labelNames: ["routeId"],
+        // Expected times are ~ 50-500ms, but in an overload NodeJS they can be greater
+        buckets: [0.01, 0.1, 1, 5],
+      }),
+      streamTime: register.histogram<"routeId">({
+        name: "lodestar_builder_http_client_stream_time_seconds",
+        help: "Builder api - streaming time by routeId",
+        labelNames: ["routeId"],
+        // Provide max resolution on problematic values around 1 second
+        buckets: [0.1, 0.5, 1, 2, 5, 15],
+      }),
+      requestErrors: register.gauge<"routeId">({
+        name: "lodestar_builder_http_client_request_errors_total",
+        help: "Total count of errors on builder http client requests by routeId",
+        labelNames: ["routeId"],
+      }),
+      requestToFallbacks: register.gauge<"routeId">({
+        name: "lodestar_builder_http_client_request_to_fallbacks_total",
+        help: "Total count of requests to fallback URLs on builder http API by routeId",
+        labelNames: ["routeId"],
+      }),
+
+      urlsScore: register.gauge<"urlIndex">({
+        name: "lodestar_builder_http_client_urls_score",
+        help: "Current score of builder http URLs by url index",
+        labelNames: ["urlIndex"],
+      }),
+    },
+
     db: {
       dbReadReq: register.gauge<"bucket">({
         name: "lodestar_db_read_req_total",
@@ -1252,6 +1452,15 @@ export function createLodestarMetrics(
         name: "lodestar_db_write_items_total",
         help: "Total count of db write items",
         labelNames: ["bucket"],
+      }),
+      dbSizeTotal: register.gauge({
+        name: "lodestar_db_size_bytes_total",
+        help: "Approximate number of bytes of file system space used by db",
+      }),
+      dbApproximateSizeTime: register.histogram({
+        name: "lodestar_db_approximate_size_time_seconds",
+        help: "Time to approximate db size in seconds",
+        buckets: [0.0001, 0.001, 0.01, 0.1, 1],
       }),
     },
   };

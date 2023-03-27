@@ -3,17 +3,18 @@ import {
   CachedBeaconStateBellatrix,
   CachedBeaconStateAltair,
   CachedBeaconStatePhase0,
+  CachedBeaconStateCapella,
 } from "@lodestar/state-transition";
 import * as slotFns from "@lodestar/state-transition/slot";
 import {phase0, ssz} from "@lodestar/types";
 import {ForkName} from "@lodestar/params";
-import {createIChainForkConfig, IChainForkConfig} from "@lodestar/config";
+import {createChainForkConfig, ChainForkConfig} from "@lodestar/config";
 import {expectEqualBeaconState, inputTypeSszTreeViewDU} from "../utils/expectEqualBeaconState.js";
 import {createCachedBeaconStateTest} from "../../utils/cachedBeaconState.js";
 import {TestRunnerFn} from "../utils/types.js";
 
 export const fork: TestRunnerFn<ForkStateCase, BeaconStateAllForks> = (forkNext) => {
-  const config = createIChainForkConfig({});
+  const config = createChainForkConfig({});
   const forkPrev = getPreviousFork(config, forkNext);
 
   return {
@@ -29,6 +30,8 @@ export const fork: TestRunnerFn<ForkStateCase, BeaconStateAllForks> = (forkNext)
           return slotFns.upgradeStateToBellatrix(preState as CachedBeaconStateAltair);
         case ForkName.capella:
           return slotFns.upgradeStateToCapella(preState as CachedBeaconStateBellatrix);
+        case ForkName.deneb:
+          return slotFns.upgradeStateToDeneb(preState as CachedBeaconStateCapella);
       }
     },
     options: {
@@ -44,16 +47,18 @@ export const fork: TestRunnerFn<ForkStateCase, BeaconStateAllForks> = (forkNext)
       expectFunc: (testCase, expected, actual) => {
         expectEqualBeaconState(forkNext, expected, actual);
       },
+      // Do not manually skip tests here, do it in packages/beacon-node/test/spec/presets/index.test.ts
     },
   };
 };
 
 type ForkStateCase = {
+  meta?: any;
   pre: BeaconStateAllForks;
   post: Exclude<BeaconStateAllForks, phase0.BeaconState>;
 };
 
-export function getPreviousFork(config: IChainForkConfig, fork: ForkName): ForkName {
+export function getPreviousFork(config: ChainForkConfig, fork: ForkName): ForkName {
   // Find the previous fork
   const forkIndex = config.forksAscendingEpochOrder.findIndex((f) => f.name === fork);
   if (forkIndex < 1) {

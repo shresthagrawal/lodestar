@@ -1,15 +1,17 @@
-import {altair} from "@lodestar/types";
+import {EncodedPayload, ResponseError, RespStatus, EncodedPayloadType} from "@lodestar/reqresp";
+import {allForks} from "@lodestar/types";
 import {IBeaconChain} from "../../../chain/index.js";
-import {ResponseError} from "../response/index.js";
-import {RespStatus} from "../../../constants/index.js";
 
 export async function* onLightClientFinalityUpdate(
   chain: IBeaconChain
-): AsyncIterable<altair.LightClientFinalityUpdate> {
+): AsyncIterable<EncodedPayload<allForks.LightClientFinalityUpdate>> {
   const finalityUpdate = chain.lightClientServer.getFinalityUpdate();
   if (finalityUpdate === null) {
     throw new ResponseError(RespStatus.RESOURCE_UNAVAILABLE, "No latest finality update available");
   } else {
-    yield finalityUpdate;
+    yield {
+      type: EncodedPayloadType.ssz,
+      data: finalityUpdate,
+    };
   }
 }

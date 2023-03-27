@@ -5,8 +5,9 @@ import {RestApiServer, RestApiServerOpts, RestApiServerModules} from "@lodestar/
 import {toHexString} from "@chainsafe/ssz";
 import {Api} from "@lodestar/api/keymanager";
 import {registerRoutes} from "@lodestar/api/keymanager/server";
-import {IChainForkConfig} from "@lodestar/config";
+import {ChainForkConfig} from "@lodestar/config";
 
+import {ServerApi} from "@lodestar/api";
 import {writeFile600Perm} from "../../../util/index.js";
 
 export type KeymanagerRestApiServerOpts = RestApiServerOpts & {
@@ -24,8 +25,8 @@ export const keymanagerRestApiServerOptsDefault: KeymanagerRestApiServerOpts = {
 };
 
 export type KeymanagerRestApiServerModules = RestApiServerModules & {
-  config: IChainForkConfig;
-  api: Api;
+  config: ChainForkConfig;
+  api: ServerApi<Api>;
 };
 
 export const apiTokenFileName = "api-token.txt";
@@ -52,7 +53,7 @@ export class KeymanagerRestApiServer extends RestApiServer {
       writeFile600Perm(apiTokenPath, bearerToken, {encoding: "utf8"});
     }
 
-    super({address: opts.address, port: opts.port, cors: opts.cors, bearerToken}, modules);
+    super({...opts, bearerToken}, modules);
 
     // Instantiate and register the keymanager routes
     registerRoutes(this.server, modules.config, modules.api);

@@ -110,9 +110,15 @@ export function isExecutionPayload(
 
 export function isCapellaPayload(
   payload: allForks.FullOrBlindedExecutionPayload
-): payload is capella.ExecutionPayload | capella.ExecutionPayloadHeader {
+): payload is capella.FullOrBlindedExecutionPayload {
   return (
     (payload as capella.ExecutionPayload).withdrawals !== undefined ||
     (payload as capella.ExecutionPayloadHeader).withdrawalsRoot !== undefined
   );
+}
+
+export function isCapellaPayloadHeader(
+  payload: capella.FullOrBlindedExecutionPayload
+): payload is capella.ExecutionPayloadHeader {
+  return (payload as capella.ExecutionPayloadHeader).withdrawalsRoot !== undefined;
 }

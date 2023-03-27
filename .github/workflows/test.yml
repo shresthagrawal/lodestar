@@ -1,8 +1,8 @@
 name: Tests
 
-on: 
+on:
   push:
-    # We intentionally don't run push on feature branches. See PR for rational. 
+    # We intentionally don't run push on feature branches. See PR for rational.
     branches: [unstable, stable]
   pull_request:
   workflow_dispatch:
@@ -10,20 +10,20 @@ on:
 jobs:
   tests-main:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: buildjet-4vcpu-ubuntu-2204
     strategy:
       fail-fast: false
       matrix:
-        node: [16]
+        node: [18]
     steps:
       # <common-build> - Uses YAML anchors in the future
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: ${{matrix.node}}
       - name: Node.js version
         id: node
-        run: echo "::set-output name=v8CppApiVersion::$(node --print "process.versions.modules")"
+        run: echo "v8CppApiVersion=$(node --print "process.versions.modules")" >> $GITHUB_OUTPUT
       - name: Restore dependencies
         uses: actions/cache@master
         id: cache-deps
@@ -49,13 +49,15 @@ jobs:
 
       # Misc sanity checks
       - name: Lint Grafana dashboards
-        run: node scripts/validate-grafana-dashboard.mjs ./dashboards
+        run: scripts/validate-grafana-dashboards.sh
       - name: Test root binary exists
         run: ./lodestar --version
       - name: Reject yarn.lock changes
         run: .github/workflows/scripts/reject_yarn_lock_changes.sh
         # Run only on forks
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+      - name: Assert ESM module exports
+        run: node scripts/assert_exports.mjs
 
       - name: Check Types
         run: yarn run check-types

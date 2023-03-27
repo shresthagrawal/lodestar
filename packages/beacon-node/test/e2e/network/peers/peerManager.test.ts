@@ -7,14 +7,13 @@ import {config} from "@lodestar/config/default";
 import {BitArray} from "@chainsafe/ssz";
 import {altair, phase0, ssz} from "@lodestar/types";
 import {sleep} from "@lodestar/utils";
-import {createIBeaconConfig} from "@lodestar/config";
-import {IReqResp, ReqRespMethod} from "../../../../src/network/reqresp/index.js";
+import {createBeaconConfig} from "@lodestar/config";
+import {IReqRespBeaconNode, ReqRespMethod} from "../../../../src/network/reqresp/ReqRespBeaconNode.js";
 import {PeerRpcScoreStore, PeerManager} from "../../../../src/network/peers/index.js";
 import {Eth2Gossipsub, getConnectionsMap, NetworkEvent, NetworkEventBus} from "../../../../src/network/index.js";
 import {PeersData} from "../../../../src/network/peers/peersData.js";
 import {createNode, getAttnets, getSyncnets} from "../../../utils/network.js";
 import {MockBeaconChain} from "../../../utils/mocks/chain/chain.js";
-import {generateEmptySignedBlock} from "../../../utils/block.js";
 import {generateState} from "../../../utils/state.js";
 import {waitForEvent} from "../../../utils/events/resolver.js";
 import {testLogger} from "../../../utils/logger.js";
@@ -37,14 +36,14 @@ describe("network / peers / PeerManager", function () {
   // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
   async function mockModules() {
     // Setup fake chain
-    const block = generateEmptySignedBlock();
+    const block = ssz.phase0.SignedBeaconBlock.defaultValue();
     const state = generateState({
       finalizedCheckpoint: {
         epoch: 0,
         root: ssz.phase0.BeaconBlock.hashTreeRoot(block.message),
       },
     });
-    const beaconConfig = createIBeaconConfig(config, state.genesisValidatorsRoot);
+    const beaconConfig = createBeaconConfig(config, state.genesisValidatorsRoot);
     const chain = new MockBeaconChain({
       genesisTime: 0,
       chainId: 0,
@@ -101,7 +100,7 @@ describe("network / peers / PeerManager", function () {
   }
 
   // Create a real event emitter with stubbed methods
-  class ReqRespFake implements IReqResp {
+  class ReqRespFake implements IReqRespBeaconNode {
     start = sinon.stub();
     stop = sinon.stub();
     status = sinon.stub();
@@ -110,11 +109,13 @@ describe("network / peers / PeerManager", function () {
     ping = sinon.stub();
     beaconBlocksByRange = sinon.stub();
     beaconBlocksByRoot = sinon.stub();
-    pruneOnPeerDisconnect = sinon.stub();
+    blobsSidecarsByRange = sinon.stub();
+    beaconBlockAndBlobsSidecarByRoot = sinon.stub();
     lightClientBootstrap = sinon.stub();
     lightClientOptimisticUpdate = sinon.stub();
     lightClientFinalityUpdate = sinon.stub();
     lightClientUpdate = sinon.stub();
+    lightClientUpdatesByRange = sinon.stub();
   }
 
   it("Should request metadata on receivedPing of unknown peer", async () => {
@@ -161,7 +162,6 @@ describe("network / peers / PeerManager", function () {
     const {chain, libp2p, networkEventBus} = await mockModules();
 
     // Simualate a peer connection, get() should return truthy
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
     getConnectionsMap(libp2p.connectionManager).set(peerId1.toString(), [libp2pConnectionOutboud]);
 
     // Subscribe to `peerConnected` event, which must fire after checking peer relevance
@@ -178,7 +178,6 @@ describe("network / peers / PeerManager", function () {
     const {chain, libp2p, reqResp, peerManager, networkEventBus} = await mockModules();
 
     // Simualate a peer connection, get() should return truthy
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
     getConnectionsMap(libp2p.connectionManager).set(peerId1.toString(), [libp2pConnectionOutboud]);
 
     // Subscribe to `peerConnected` event, which must fire after checking peer relevance
@@ -192,7 +191,6 @@ describe("network / peers / PeerManager", function () {
     reqResp.metadata.resolves(remoteMetadata);
 
     // Simualate a peer connection, get() should return truthy
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
     getConnectionsMap(libp2p.connectionManager).set(peerId1.toString(), [libp2pConnectionOutboud]);
     (libp2p.connectionManager as DefaultConnectionManager).dispatchEvent(
       new CustomEvent("peer:connect", {detail: libp2pConnectionOutboud})

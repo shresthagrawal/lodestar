@@ -5,7 +5,7 @@ import {
   PeerScoreThresholds,
 } from "@chainsafe/libp2p-gossipsub/score";
 import {computeCommitteeCount} from "@lodestar/state-transition";
-import {IBeaconConfig} from "@lodestar/config";
+import {BeaconConfig} from "@lodestar/config";
 import {ATTESTATION_SUBNET_COUNT, SLOTS_PER_EPOCH, TARGET_AGGREGATORS_PER_COMMITTEE} from "@lodestar/params";
 import {Eth2Context} from "../../chain/index.js";
 import {getActiveForks} from "../forks.js";
@@ -26,6 +26,7 @@ const BEACON_AGGREGATE_PROOF_WEIGHT = 0.5;
 const VOLUNTARY_EXIT_WEIGHT = 0.05;
 const PROPOSER_SLASHING_WEIGHT = 0.05;
 const ATTESTER_SLASHING_WEIGHT = 0.05;
+const BLS_TO_EXECUTION_CHANGE_WEIGHT = 0.05;
 
 const beaconAttestationSubnetWeight = 1 / ATTESTATION_SUBNET_COUNT;
 const maxPositiveScore =
@@ -35,7 +36,8 @@ const maxPositiveScore =
     beaconAttestationSubnetWeight * ATTESTATION_SUBNET_COUNT +
     VOLUNTARY_EXIT_WEIGHT +
     PROPOSER_SLASHING_WEIGHT +
-    ATTESTER_SLASHING_WEIGHT);
+    ATTESTER_SLASHING_WEIGHT +
+    BLS_TO_EXECUTION_CHANGE_WEIGHT);
 
 /**
  * The following params is implemented by Lighthouse at
@@ -48,6 +50,12 @@ export const gossipScoreThresholds: PeerScoreThresholds = {
   acceptPXThreshold: 100,
   opportunisticGraftThreshold: 5,
 };
+
+/**
+ * Peer may sometimes has negative gossipsub score and we give it time to recover, however gossipsub score comes below this we need to take into account.
+ * Given gossipsubThresold = -4000, it's comfortable to only ignore negative score gossip peer score > -1000
+ */
+export const negativeGossipScoreIgnoreThreshold = -1000;
 
 type MeshMessageInfo = {
   decaySlots: number;
@@ -111,7 +119,7 @@ export function computeGossipPeerScoreParams({
 }
 
 function getAllTopicsScoreParams(
-  config: IBeaconConfig,
+  config: BeaconConfig,
   eth2Context: Eth2Context,
   precomputedParams: PreComputedParams
 ): Record<string, TopicScoreParams> {
@@ -132,6 +140,18 @@ function getAllTopicsScoreParams(
       expectedMessageRate: 4 / SLOTS_PER_EPOCH,
       firstMessageDecayTime: epochDurationMs * 100,
     });
+
+    topicsParams[
+      stringifyGossipTopic(config, {
+        type: GossipType.bls_to_execution_change,
+        fork,
+      })
+    ] = getTopicScoreParams(config, precomputedParams, {
+      topicWeight: BLS_TO_EXECUTION_CHANGE_WEIGHT,
+      expectedMessageRate: 4 / SLOTS_PER_EPOCH,
+      firstMessageDecayTime: epochDurationMs * 100,
+    });
+
     topicsParams[
       stringifyGossipTopic(config, {
         type: GossipType.attester_slashing,
@@ -224,7 +244,7 @@ function getAllTopicsScoreParams(
 }
 
 function getTopicScoreParams(
-  config: IBeaconConfig,
+  config: BeaconConfig,
   {epochDurationMs, slotDurationMs, scoreParameterDecayFn}: PreComputedParams,
   {topicWeight, expectedMessageRate, firstMessageDecayTime, meshMessageInfo}: TopicScoreInput
 ): TopicScoreParams {

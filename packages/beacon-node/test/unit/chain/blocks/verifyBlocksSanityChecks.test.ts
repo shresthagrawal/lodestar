@@ -5,18 +5,19 @@ import {config} from "@lodestar/config/default";
 import {ForkChoice, IForkChoice, ProtoBlock} from "@lodestar/fork-choice";
 import {computeStartSlotAtEpoch} from "@lodestar/state-transition";
 import {toHex} from "@lodestar/utils";
-import {IChainForkConfig} from "@lodestar/config";
+import {ChainForkConfig} from "@lodestar/config";
 import {allForks, Slot, ssz} from "@lodestar/types";
-import {verifyBlocksSanityChecks} from "../../../../src/chain/blocks/verifyBlocksSanityChecks.js";
+import {verifyBlocksSanityChecks as verifyBlocksImportSanityChecks} from "../../../../src/chain/blocks/verifyBlocksSanityChecks.js";
 import {BlockErrorCode} from "../../../../src/chain/errors/index.js";
 import {expectThrowsLodestarError} from "../../../utils/errors.js";
-import {IBeaconClock} from "../../../../src/chain/index.js";
+import {BeaconClock} from "../../../../src/chain/index.js";
 import {ClockStopped} from "../../../utils/mocks/clock.js";
+import {getBlockInput} from "../../../../src/chain/blocks/types.js";
 
 describe("chain / blocks / verifyBlocksSanityChecks", function () {
   let forkChoice: SinonStubbedInstance<ForkChoice>;
   let clock: ClockStopped;
-  let modules: {forkChoice: IForkChoice; clock: IBeaconClock; config: IChainForkConfig};
+  let modules: {forkChoice: IForkChoice; clock: BeaconClock; config: ChainForkConfig};
   let block: allForks.SignedBeaconBlock;
   const currentSlot = 1;
 
@@ -27,7 +28,7 @@ describe("chain / blocks / verifyBlocksSanityChecks", function () {
     forkChoice = sinon.createStubInstance(ForkChoice);
     forkChoice.getFinalizedCheckpoint.returns({epoch: 0, root: Buffer.alloc(32), rootHex: ""});
     clock = new ClockStopped(currentSlot);
-    modules = {config, forkChoice, clock} as {forkChoice: IForkChoice; clock: IBeaconClock; config: IChainForkConfig};
+    modules = {config, forkChoice, clock} as {forkChoice: IForkChoice; clock: BeaconClock; config: ChainForkConfig};
     // On first call, parentRoot is known
     forkChoice.getBlockHex.returns({} as ProtoBlock);
   });
@@ -115,6 +116,26 @@ describe("chain / blocks / verifyBlocksSanityChecks", function () {
     expectBlocks(relevantBlocks, [blocks[2], blocks[3]], blocks, "Wrong relevantBlocks");
   });
 });
+
+/**
+ * Wrap verifyBlocksSanityChecks to deal with SignedBeaconBlock instead of BlockImport
+ */
+function verifyBlocksSanityChecks(
+  modules: Parameters<typeof verifyBlocksImportSanityChecks>[0],
+  blocks: allForks.SignedBeaconBlock[],
+  opts: Parameters<typeof verifyBlocksImportSanityChecks>[2]
+): {relevantBlocks: allForks.SignedBeaconBlock[]; parentSlots: Slot[]; parentBlock: ProtoBlock | null} {
+  const {relevantBlocks, parentSlots, parentBlock} = verifyBlocksImportSanityChecks(
+    modules,
+    blocks.map((block) => getBlockInput.preDeneb(config, block)),
+    opts
+  );
+  return {
+    relevantBlocks: relevantBlocks.map(({block}) => block),
+    parentSlots,
+    parentBlock,
+  };
+}
 
 function getValidChain(count: number, initialSlot = 0): allForks.SignedBeaconBlock[] {
   const blocks: allForks.SignedBeaconBlock[] = [];

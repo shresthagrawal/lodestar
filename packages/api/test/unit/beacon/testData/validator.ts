@@ -6,7 +6,7 @@ import {GenericServerTestCases} from "../../../utils/genericServerTest.js";
 const ZERO_HASH = Buffer.alloc(32, 0);
 const ZERO_HASH_HEX = "0x" + ZERO_HASH.toString("hex");
 const randaoReveal = Buffer.alloc(96, 1);
-const graffiti = "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2";
+const graffiti = "a".repeat(32);
 
 export const testData: GenericServerTestCases<Api> = {
   getAttesterDuties: {
@@ -44,15 +44,19 @@ export const testData: GenericServerTestCases<Api> = {
   },
   produceBlock: {
     args: [32000, randaoReveal, graffiti],
-    res: {data: ssz.phase0.BeaconBlock.defaultValue()},
+    res: {data: ssz.phase0.BeaconBlock.defaultValue(), blockValue: ssz.Wei.defaultValue()},
   },
   produceBlockV2: {
     args: [32000, randaoReveal, graffiti],
-    res: {data: ssz.altair.BeaconBlock.defaultValue(), version: ForkName.altair},
+    res: {data: ssz.altair.BeaconBlock.defaultValue(), version: ForkName.altair, blockValue: ssz.Wei.defaultValue()},
   },
   produceBlindedBlock: {
     args: [32000, randaoReveal, graffiti],
-    res: {data: ssz.bellatrix.BlindedBeaconBlock.defaultValue(), version: ForkName.bellatrix},
+    res: {
+      data: ssz.bellatrix.BlindedBeaconBlock.defaultValue(),
+      version: ForkName.bellatrix,
+      blockValue: ssz.Wei.defaultValue(),
+    },
   },
   produceAttestationData: {
     args: [2, 32000],

@@ -1,7 +1,7 @@
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {expect} from "chai";
-import {createIChainForkConfig, defaultChainConfig} from "@lodestar/config";
+import {createChainForkConfig, defaultChainConfig} from "@lodestar/config";
 import {OpenApiFile} from "../../utils/parseOpenApiSpec.js";
 import {routes} from "../../../src/beacon/index.js";
 import {ReqSerializers} from "../../../src/utils/types.js";
@@ -15,6 +15,7 @@ import {testData as debugTestData} from "./testData/debug.js";
 import {eventTestData, testData as eventsTestData} from "./testData/events.js";
 import {testData as lightclientTestData} from "./testData/lightclient.js";
 import {testData as nodeTestData} from "./testData/node.js";
+import {testData as proofsTestData} from "./testData/proofs.js";
 import {testData as validatorTestData} from "./testData/validator.js";
 
 // Global variable __dirname no longer available in ES6 modules.
@@ -36,6 +37,7 @@ const routesData = {
   ...routes.events.routesData,
   ...routes.lightclient.routesData,
   ...routes.node.routesData,
+  ...routes.proof.routesData,
   ...routes.validator.routesData,
 };
 
@@ -49,7 +51,7 @@ const getEventsReqSerializers = (): ReqSerializers<routes.events.Api, routes.eve
 });
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
-const config = createIChainForkConfig({...defaultChainConfig, ALTAIR_FORK_EPOCH: 1, BELLATRIX_FORK_EPOCH: 2});
+const config = createChainForkConfig({...defaultChainConfig, ALTAIR_FORK_EPOCH: 1, BELLATRIX_FORK_EPOCH: 2});
 const reqSerializers = {
   ...routes.beacon.getReqSerializers(config),
   ...routes.config.getReqSerializers(),
@@ -57,6 +59,7 @@ const reqSerializers = {
   ...getEventsReqSerializers(),
   ...routes.lightclient.getReqSerializers(),
   ...routes.node.getReqSerializers(),
+  ...routes.proof.getReqSerializers(),
   ...routes.validator.getReqSerializers(),
 };
 
@@ -66,6 +69,7 @@ const returnTypes = {
   ...routes.debug.getReturnTypes(),
   ...routes.lightclient.getReturnTypes(),
   ...routes.node.getReturnTypes(),
+  ...routes.proof.getReturnTypes(),
   ...routes.validator.getReturnTypes(),
 };
 
@@ -76,6 +80,7 @@ const testDatas = {
   ...eventsTestData,
   ...lightclientTestData,
   ...nodeTestData,
+  ...proofsTestData,
   ...validatorTestData,
 };
 
@@ -105,12 +110,12 @@ describe("eventstream event data", () => {
     }
   });
 
-  const eventSerdes = routes.events.getEventSerdes();
-  const knownTopics = Object.values(routes.events.EventType) as string[];
+  const eventSerdes = routes.events.getEventSerdes(config);
+  const knownTopics = new Set<string>(Object.values(routes.events.eventTypes));
 
   for (const [topic, {value}] of Object.entries(eventstreamExamples ?? {})) {
     it(topic, () => {
-      if (!knownTopics.includes(topic)) {
+      if (!knownTopics.has(topic)) {
         throw Error(`topic ${topic} not implemented`);
       }
 

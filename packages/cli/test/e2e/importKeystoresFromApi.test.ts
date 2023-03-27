@@ -4,6 +4,7 @@ import {expect} from "chai";
 import {DeletionStatus, getClient, ImportStatus} from "@lodestar/api/keymanager";
 import {config} from "@lodestar/config/default";
 import {Interchange} from "@lodestar/validator";
+import {ApiError, HttpStatusCode} from "@lodestar/api";
 import {testFilesDir} from "../utils.js";
 import {bufferStderr, describeCliTest} from "../utils/childprocRunner.js";
 import {cachedPubkeysHex, cachedSeckeysHex} from "../utils/cachedKeys.js";
@@ -37,6 +38,21 @@ describeCliTest("import keystores from api", function ({spawnCli}) {
     },
     data: [],
   };
+
+  /** From multiple tries, 20_000 results in a JSON of ~ 3MB */
+  const SLASHING_PROTECTION_ENTRIES = 20_000;
+  for (let i = 0; i < SLASHING_PROTECTION_ENTRIES; i++) {
+    slashingProtection.data.push({
+      pubkey: "0x" + String(i).padStart(96, "0"),
+      signed_blocks: [],
+      signed_attestations: [],
+    });
+    // // Uncomment to test if size is correct
+    // if (i % 100 === 0) {
+    //   console.log(i, Buffer.from(JSON.stringify(slashingProtection), "utf8").length / 1e6);
+    // }
+  }
+
   const slashingProtectionStr = JSON.stringify(slashingProtection);
 
   itKeymanagerStep("run 'validator' and import remote keys from API", async function (keymanagerClient) {
@@ -48,8 +64,9 @@ describeCliTest("import keystores from api", function ({spawnCli}) {
 
     // Import test keys
     const importRes = await keymanagerClient.importKeystores(keystoresStr, passphrases, slashingProtectionStr);
+    ApiError.assert(importRes);
     expectDeepEquals(
-      importRes.data,
+      importRes.response.data,
       pubkeys.map(() => ({status: ImportStatus.imported})),
       "Wrong importKeystores response"
     );
@@ -59,8 +76,9 @@ describeCliTest("import keystores from api", function ({spawnCli}) {
 
     // Attempt to import the same keys again
     const importAgainRes = await keymanagerClient.importKeystores(keystoresStr, passphrases, slashingProtectionStr);
+    ApiError.assert(importAgainRes);
     expectDeepEquals(
-      importAgainRes.data,
+      importAgainRes.response.data,
       pubkeys.map(() => ({status: ImportStatus.duplicate})),
       "Wrong importKeystores again response"
     );
@@ -99,8 +117,9 @@ describeCliTest("import keystores from api", function ({spawnCli}) {
 
     // Delete keys
     const deleteRes = await keymanagerClient.deleteKeys(pubkeys);
+    ApiError.assert(deleteRes);
     expectDeepEquals(
-      deleteRes.data,
+      deleteRes.response.data,
       pubkeys.map(() => ({status: DeletionStatus.deleted})),
       "Wrong deleteKeys response"
     );
@@ -116,6 +135,8 @@ describeCliTest("import keystores from api", function ({spawnCli}) {
 
   itKeymanagerStep("reject calls without bearerToken", async function (_, {keymanagerUrl}) {
     const keymanagerClientNoAuth = getClient({baseUrl: keymanagerUrl, bearerToken: undefined}, {config});
-    await expect(keymanagerClientNoAuth.listRemoteKeys()).to.rejectedWith("Unauthorized");
+    const res = await keymanagerClientNoAuth.listRemoteKeys();
+    expect(res.ok).to.be.false;
+    expect(res.error?.code).to.be.eql(HttpStatusCode.UNAUTHORIZED);
   });
 });

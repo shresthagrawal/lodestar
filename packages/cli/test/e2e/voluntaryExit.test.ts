@@ -1,6 +1,6 @@
 import path from "node:path";
-import {retry} from "@lodestar/utils";
-import {getClient} from "@lodestar/api";
+import {sleep, retry} from "@lodestar/utils";
+import {ApiError, getClient} from "@lodestar/api";
 import {config} from "@lodestar/config/default";
 import {interopSecretKey} from "@lodestar/state-transition";
 import {testFilesDir} from "../utils.js";
@@ -33,14 +33,15 @@ describeCliTest("voluntaryExit cmd", function ({spawnCli}) {
       }
     });
 
-    const baseUrl = `http://localhost:${restPort}`;
+    const baseUrl = `http://127.0.0.1:${restPort}`;
     const client = getClient({baseUrl}, {config});
 
     // Wait for beacon node API to be available + genesis
     await retry(
       async () => {
         const head = await client.beacon.getBlockHeader("head");
-        if (head.data.header.message.slot < 1) throw Error("pre-genesis");
+        ApiError.assert(head);
+        if (head.response.data.header.message.slot < 1) throw Error("pre-genesis");
       },
       {retryDelay: 1000, retries: 20}
     );
@@ -68,16 +69,21 @@ describeCliTest("voluntaryExit cmd", function ({spawnCli}) {
     for (const pubkey of pubkeysToExit) {
       await retry(
         async () => {
-          const {data} = await client.beacon.getStateValidator("head", pubkey);
-          if (data.status !== "active_exiting") {
+          const res = await client.beacon.getStateValidator("head", pubkey);
+          ApiError.assert(res);
+          if (res.response.data.status !== "active_exiting") {
             throw Error("Validator not exiting");
           } else {
             // eslint-disable-next-line no-console
-            console.log(`Confirmed validator ${pubkey} = ${data.status}`);
+            console.log(`Confirmed validator ${pubkey} = ${res.response.data.status}`);
           }
         },
         {retryDelay: 1000, retries: 20}
       );
     }
+
+    devBnProc.kill("SIGINT");
+    await sleep(1000);
+    devBnProc.kill("SIGKILL");
   });
 });

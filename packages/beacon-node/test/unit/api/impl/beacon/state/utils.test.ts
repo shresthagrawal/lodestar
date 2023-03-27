@@ -5,11 +5,14 @@ import {phase0} from "@lodestar/types";
 import {config} from "@lodestar/config/default";
 import {SLOTS_PER_EPOCH} from "@lodestar/params";
 import {toHexString} from "@chainsafe/ssz";
-import {resolveStateId, getValidatorStatus} from "../../../../../../src/api/impl/beacon/state/utils.js";
+import {
+  resolveStateId,
+  getValidatorStatus,
+  getStateValidatorIndex,
+} from "../../../../../../src/api/impl/beacon/state/utils.js";
 import {IBeaconChain} from "../../../../../../src/chain/index.js";
-import {PERSIST_STATE_EVERY_EPOCHS} from "../../../../../../src/chain/archiver/archiveStates.js";
-import {generateProtoBlock} from "../../../../../utils/block.js";
-import {generateCachedState, generateState} from "../../../../../utils/state.js";
+import {generateProtoBlock} from "../../../../../utils/typeGenerator.js";
+import {generateCachedAltairState, generateCachedState, generateState} from "../../../../../utils/state.js";
 import {StubbedBeaconDb} from "../../../../../utils/stub/index.js";
 
 use(chaiAsPromised);
@@ -63,7 +66,7 @@ describe("beacon state api utils", function () {
 
     it("resolve state by root", async function () {
       const get = sinon.stub().returns(generateCachedState());
-      const chainStub = ({stateCache: {get}} as unknown) as IBeaconChain;
+      const chainStub = ({stateCache: {get}, forkChoice: {getBlock: sinon.stub()}} as unknown) as IBeaconChain;
 
       const state = await resolveStateId(config, chainStub, dbStub, otherRoot);
       expect(state).to.not.be.null;
@@ -87,7 +90,7 @@ describe("beacon state api utils", function () {
     });
 
     it("resolve state on unarchived finalized slot", async function () {
-      const nearestArchiveSlot = PERSIST_STATE_EVERY_EPOCHS * SLOTS_PER_EPOCH;
+      const nearestArchiveSlot = 1024 * SLOTS_PER_EPOCH;
       const finalizedEpoch = 1028;
       const requestedSlot = 1026 * SLOTS_PER_EPOCH;
 
@@ -112,7 +115,7 @@ describe("beacon state api utils", function () {
         blockArchive: {valuesStream: blockArchiveValuesStream},
         stateArchive: {get, valuesStream: stateArchiveValuesStream},
       } as StubbedBeaconDb;
-      const state = await resolveStateId(config, chainStub, tempDbStub, requestedSlot.toString(), {
+      const {state} = await resolveStateId(config, chainStub, tempDbStub, requestedSlot.toString(), {
         regenFinalizedState: true,
       });
       expect(state).to.not.be.null;
@@ -213,6 +216,49 @@ describe("beacon state api utils", function () {
         getValidatorStatus(validator, currentEpoch);
       } catch (error) {
         expect(error).to.have.property("message", "ValidatorStatus unknown");
+      }
+    });
+  });
+
+  describe("getStateValidatorIndex", async function () {
+    const state = generateCachedAltairState();
+    const pubkey2index = state.epochCtx.pubkey2index;
+
+    it("should return valid: false on invalid input", () => {
+      expect(getStateValidatorIndex("foo", state, pubkey2index).valid, "invalid validator id number").to.equal(false);
+      expect(getStateValidatorIndex("0xfoo", state, pubkey2index).valid, "invalid hex").to.equal(false);
+    });
+
+    it("should return valid: false on validator indices / pubkeys not in the state", () => {
+      expect(
+        getStateValidatorIndex(String(state.validators.length), state, pubkey2index).valid,
+        "validator id not in state"
+      ).to.equal(false);
+      expect(getStateValidatorIndex("0xabcd", state, pubkey2index).valid, "validator pubkey not in state").to.equal(
+        false
+      );
+    });
+
+    it("should return valid: true on validator indices / pubkeys in the state", () => {
+      const index = state.validators.length - 1;
+      const resp1 = getStateValidatorIndex(String(index), state, pubkey2index);
+      if (resp1.valid) {
+        expect(resp1.validatorIndex).to.equal(index);
+      } else {
+        expect.fail("validator index should be found - validator index input");
+      }
+      const pubkey = state.validators.get(index).pubkey;
+      const resp2 = getStateValidatorIndex(pubkey, state, pubkey2index);
+      if (resp2.valid) {
+        expect(resp2.validatorIndex).to.equal(index);
+      } else {
+        expect.fail("validator index should be found - Uint8Array input");
+      }
+      const resp3 = getStateValidatorIndex(toHexString(pubkey), state, pubkey2index);
+      if (resp3.valid) {
+        expect(resp3.validatorIndex).to.equal(index);
+      } else {
+        expect.fail("validator index should be found - Uint8Array input");
       }
     });
   });

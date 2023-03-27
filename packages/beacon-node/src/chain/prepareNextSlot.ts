@@ -1,10 +1,10 @@
 import {computeEpochAtSlot, isExecutionStateType, computeTimeAtSlot} from "@lodestar/state-transition";
-import {IChainForkConfig} from "@lodestar/config";
-import {ForkSeq, SLOTS_PER_EPOCH} from "@lodestar/params";
+import {ChainForkConfig} from "@lodestar/config";
+import {ForkSeq, SLOTS_PER_EPOCH, ForkExecution} from "@lodestar/params";
 import {Slot} from "@lodestar/types";
-import {ILogger, sleep} from "@lodestar/utils";
+import {Logger, sleep} from "@lodestar/utils";
 import {GENESIS_SLOT, ZERO_HASH_HEX} from "../constants/constants.js";
-import {IMetrics} from "../metrics/index.js";
+import {Metrics} from "../metrics/index.js";
 import {TransitionConfigurationV1} from "../execution/engine/interface.js";
 import {ChainEvent} from "./emitter.js";
 import {prepareExecutionPayload} from "./produceBlock/produceBlockBody.js";
@@ -32,9 +32,9 @@ export class PrepareNextSlotScheduler {
   private transitionConfig: TransitionConfigurationV1 | null = null;
   constructor(
     private readonly chain: IBeaconChain,
-    private readonly config: IChainForkConfig,
-    private readonly metrics: IMetrics | null,
-    private readonly logger: ILogger,
+    private readonly config: ChainForkConfig,
+    private readonly metrics: Metrics | null,
+    private readonly logger: Logger,
     private readonly signal: AbortSignal
   ) {
     this.chain.emitter.on(ChainEvent.clockSlot, this.prepareForNextSlot);
@@ -55,13 +55,11 @@ export class PrepareNextSlotScheduler {
     const prepareEpoch = computeEpochAtSlot(prepareSlot);
     const nextEpoch = computeEpochAtSlot(clockSlot) + 1;
     const isEpochTransition = prepareEpoch === nextEpoch;
+    const fork = this.config.getForkName(prepareSlot);
 
     // Early return if we are pre-genesis
     //  or we are pre-bellatrix and this is not an epoch transition
-    if (
-      prepareSlot <= GENESIS_SLOT ||
-      (this.config.getForkSeq(prepareSlot) < ForkSeq.bellatrix && !isEpochTransition)
-    ) {
+    if (prepareSlot <= GENESIS_SLOT || (ForkSeq[fork] < ForkSeq.bellatrix && !isEpochTransition)) {
       return;
     }
 
@@ -97,7 +95,12 @@ export class PrepareNextSlotScheduler {
       // No need to wait for this or the clock drift
       // Pre Bellatrix: we only do precompute state transition for the last slot of epoch
       // For Bellatrix, we always do the `processSlots()` to prepare payload for the next slot
-      const prepareState = await this.chain.regen.getBlockSlotState(headRoot, prepareSlot, RegenCaller.precomputeEpoch);
+      const prepareState = await this.chain.regen.getBlockSlotState(
+        headRoot,
+        prepareSlot,
+        {dontTransferCache: true},
+        RegenCaller.precomputeEpoch
+      );
 
       // assuming there is no reorg, it caches the checkpoint state & helps avoid doing a full state transition in the next slot
       //  + when gossip block comes, we need to validate and run state transition
@@ -138,7 +141,15 @@ export class PrepareNextSlotScheduler {
           // awaiting here instead of throwing an async call because there is no other task
           // left for scheduler and this gives nice sematics to catch and log errors in the
           // try/catch wrapper here.
-          await prepareExecutionPayload(this.chain, safeBlockHash, finalizedBlockHash, prepareState, feeRecipient);
+          await prepareExecutionPayload(
+            this.chain,
+            this.logger,
+            fork as ForkExecution, // State is of execution type
+            safeBlockHash,
+            finalizedBlockHash,
+            prepareState,
+            feeRecipient
+          );
           this.logger.verbose("PrepareNextSlotScheduler prepared new payload", {
             prepareSlot,
             proposerIndex,

@@ -1,4 +1,4 @@
-import {routes} from "@lodestar/api";
+import {routes, ServerApi} from "@lodestar/api";
 import {
   CachedBeaconStateAllForks,
   computeStartSlotAtEpoch,
@@ -6,30 +6,27 @@ import {
   attesterShufflingDecisionRoot,
   getBlockRootAtSlot,
   computeEpochAtSlot,
+  getCurrentSlot,
 } from "@lodestar/state-transition";
 import {GENESIS_SLOT, SLOTS_PER_EPOCH, SLOTS_PER_HISTORICAL_ROOT, SYNC_COMMITTEE_SUBNET_SIZE} from "@lodestar/params";
-import {Root, Slot, ValidatorIndex, ssz, Epoch} from "@lodestar/types";
+import {Root, Slot, ValidatorIndex, ssz, Epoch, BlockSource} from "@lodestar/types";
 import {ExecutionStatus} from "@lodestar/fork-choice";
 import {toHex} from "@lodestar/utils";
-import {fromHexString} from "@chainsafe/ssz";
+import {fromHexString, toHexString} from "@chainsafe/ssz";
 import {AttestationError, AttestationErrorCode, GossipAction, SyncCommitteeError} from "../../../chain/errors/index.js";
 import {validateGossipAggregateAndProof} from "../../../chain/validation/index.js";
 import {ZERO_HASH} from "../../../constants/index.js";
 import {SyncState} from "../../../sync/index.js";
-import {isOptimsticBlock} from "../../../util/forkChoice.js";
+import {isOptimisticBlock} from "../../../util/forkChoice.js";
 import {toGraffitiBuffer} from "../../../util/graffiti.js";
 import {ApiError, NodeIsSyncing} from "../errors.js";
 import {validateSyncCommitteeGossipContributionAndProof} from "../../../chain/validation/syncCommitteeContributionAndProof.js";
 import {CommitteeSubscription} from "../../../network/subnets/index.js";
 import {ApiModules} from "../types.js";
 import {RegenCaller} from "../../../chain/regen/index.js";
+import {getValidatorStatus} from "../beacon/state/utils.js";
+import {validateGossipFnRetryUnknownRoot} from "../../../network/gossip/handlers/index.js";
 import {computeSubnetForCommitteesAtSlot, getPubkeysForIndices} from "./utils.js";
-
-/**
- * Validator clock may be advanced from beacon's clock. If the validator requests a resource in a
- * future slot, wait some time instead of rejecting the request because it's in the future
- */
-const MAX_API_CLOCK_DISPARITY_MS = 1000;
 
 /**
  * If the node is within this many epochs from the head, we declare it to be synced regardless of
@@ -39,7 +36,7 @@ const MAX_API_CLOCK_DISPARITY_MS = 1000;
  * finalized head.
  *
  * TODO: Lighthouse uses 8 for the attack described above. However, 8 kills Lodestar since validators
- * can trigger regen to fast-forward head state 8 epochs to be immediatelly invalidated as sync sets
+ * can trigger regen to fast-forward head state 8 epochs to be immediately invalidated as sync sets
  * a new head. Then the checkpoint state cache grows unbounded with very different states (because
  * they are 8 epochs apart) and causes an OOM. Research a proper solution once regen and the state
  * caches are better.
@@ -50,8 +47,23 @@ const SYNC_TOLERANCE_EPOCHS = 1;
  * Server implementation for handling validator duties.
  * See `@lodestar/validator/src/api` for the client implementation).
  */
-export function getValidatorApi({chain, config, logger, metrics, network, sync}: ApiModules): routes.validator.Api {
+export function getValidatorApi({
+  chain,
+  config,
+  logger,
+  metrics,
+  network,
+  sync,
+}: ApiModules): ServerApi<routes.validator.Api> {
   let genesisBlockRoot: Root | null = null;
+
+  /**
+   * Validator clock may be advanced from beacon's clock. If the validator requests a resource in a
+   * future slot, wait some time instead of rejecting the request because it's in the future.
+   * For very fast networks, reduce clock disparity to half a slot.
+   */
+  const MAX_API_CLOCK_DISPARITY_SEC = Math.min(1, config.SECONDS_PER_SLOT / 2);
+  const MAX_API_CLOCK_DISPARITY_MS = MAX_API_CLOCK_DISPARITY_SEC * 1000;
 
   /** Compute and cache the genesis block root */
   async function getGenesisBlockRoot(state: CachedBeaconStateAllForks): Promise<Root> {
@@ -105,6 +117,10 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
     if (msToNextEpoch > 0 && msToNextEpoch < MAX_API_CLOCK_DISPARITY_MS) {
       await chain.clock.waitForSlot(computeStartSlotAtEpoch(nextEpoch));
     }
+  }
+
+  function currentEpochWithDisparity(): Epoch {
+    return computeEpochAtSlot(getCurrentSlot(config, chain.genesisTime - MAX_API_CLOCK_DISPARITY_SEC));
   }
 
   /**
@@ -169,13 +185,14 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       );
   }
 
-  const produceBlindedBlock: routes.validator.Api["produceBlindedBlock"] = async function produceBlindedBlock(
+  const produceBlindedBlock: ServerApi<routes.validator.Api>["produceBlindedBlock"] = async function produceBlindedBlock(
     slot,
     randaoReveal,
     graffiti
   ) {
+    const source = BlockSource.builder;
     let timer;
-    metrics?.blockProductionRequests.inc();
+    metrics?.blockProductionRequests.inc({source});
     try {
       notWhileSyncing();
       await waitForSlot(slot); // Must never request for a future slot > currentSlot
@@ -195,25 +212,32 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       chain.forkChoice.updateHead();
 
       timer = metrics?.blockProductionTime.startTimer();
-      const block = await chain.produceBlindedBlock({
+      const {block, blockValue} = await chain.produceBlindedBlock({
         slot,
         randaoReveal,
         graffiti: toGraffitiBuffer(graffiti || ""),
       });
-      metrics?.blockProductionSuccess.inc();
-      return {data: block, version: config.getForkName(block.slot)};
+      metrics?.blockProductionSuccess.inc({source});
+      metrics?.blockProductionNumAggregated.observe({source}, block.body.attestations.length);
+      logger.verbose("Produced blinded block", {
+        slot,
+        blockValue,
+        root: toHexString(config.getBlindedForkTypes(slot).BeaconBlock.hashTreeRoot(block)),
+      });
+      return {data: block, version: config.getForkName(block.slot), blockValue};
     } finally {
-      if (timer) timer();
+      if (timer) timer({source});
     }
   };
 
-  const produceBlock: routes.validator.Api["produceBlockV2"] = async function produceBlock(
+  const produceBlock: ServerApi<routes.validator.Api>["produceBlockV2"] = async function produceBlock(
     slot,
     randaoReveal,
     graffiti
   ) {
+    const source = BlockSource.engine;
     let timer;
-    metrics?.blockProductionRequests.inc();
+    metrics?.blockProductionRequests.inc({source});
     try {
       notWhileSyncing();
       await waitForSlot(slot); // Must never request for a future slot > currentSlot
@@ -225,15 +249,21 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       chain.recomputeForkChoiceHead();
 
       timer = metrics?.blockProductionTime.startTimer();
-      const block = await chain.produceBlock({
+      const {block, blockValue} = await chain.produceBlock({
         slot,
         randaoReveal,
         graffiti: toGraffitiBuffer(graffiti || ""),
       });
-      metrics?.blockProductionSuccess.inc();
-      return {data: block, version: config.getForkName(block.slot)};
+      metrics?.blockProductionSuccess.inc({source});
+      metrics?.blockProductionNumAggregated.observe({source}, block.body.attestations.length);
+      logger.verbose("Produced execution block", {
+        slot,
+        blockValue,
+        root: toHexString(config.getForkTypes(slot).BeaconBlock.hashTreeRoot(block)),
+      });
+      return {data: block, version: config.getForkName(block.slot), blockValue};
     } finally {
-      if (timer) timer();
+      if (timer) timer({source});
     }
   };
 
@@ -248,7 +278,7 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       await waitForSlot(slot); // Must never request for a future slot > currentSlot
 
       // This needs a state in the same epoch as `slot` such that state.currentJustifiedCheckpoint is correct.
-      // Note: This may trigger an epoch transition if there skipped slots at the begining of the epoch.
+      // Note: This may trigger an epoch transition if there skipped slots at the beginning of the epoch.
       const headState = chain.getHeadState();
       const headSlot = headState.slot;
       const attEpoch = computeEpochAtSlot(slot);
@@ -281,7 +311,12 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
         attEpoch <= headEpoch
           ? headState
           : // Will advance the state to the correct next epoch if necessary
-            await chain.regen.getBlockSlotState(headBlockRootHex, slot, RegenCaller.produceAttestationData);
+            await chain.regen.getBlockSlotState(
+              headBlockRootHex,
+              slot,
+              {dontTransferCache: true},
+              RegenCaller.produceAttestationData
+            );
 
       return {
         data: {
@@ -306,6 +341,14 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
      * @param beaconBlockRoot The block root for which to produce the contribution.
      */
     async produceSyncCommitteeContribution(slot, subcommitteeIndex, beaconBlockRoot) {
+      // when a validator is configured with multiple beacon node urls, this beaconBlockRoot may come from another beacon node
+      // and it hasn't been in our forkchoice since we haven't seen / processing that block
+      // see https://github.com/ChainSafe/lodestar/issues/5063
+      if (!chain.forkChoice.getBlock(beaconBlockRoot)) {
+        // if result of this call is false, i.e. block hasn't seen after 1 slot then the below notOnOptimisticBlockRoot call will throw error
+        await chain.waitForBlock(slot, toHexString(beaconBlockRoot));
+      }
+
       // Check the execution status as validator shouldn't contribute on an optimistic head
       notOnOptimisticBlockRoot(beaconBlockRoot);
 
@@ -317,8 +360,14 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
     async getProposerDuties(epoch) {
       notWhileSyncing();
 
-      const startSlot = computeStartSlotAtEpoch(epoch);
-      await waitForSlot(startSlot); // Must never request for a future slot > currentSlot
+      // Early check that epoch is within [current_epoch, current_epoch + 1], or allow for pre-genesis
+      const currentEpoch = currentEpochWithDisparity();
+      if (currentEpoch >= 0 && epoch !== currentEpoch && epoch !== currentEpoch + 1) {
+        throw Error(`Requested epoch ${epoch} must equal current ${currentEpoch} or next epoch ${currentEpoch + 1}`);
+      }
+
+      // May request for an epoch that's in the future, for getBeaconProposersNextEpoch()
+      await waitForNextClosestEpoch();
 
       const head = chain.forkChoice.getHead();
       const state = await chain.getHeadStateAtCurrentEpoch();
@@ -333,6 +382,7 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
         // @see `epochCtx.getBeaconProposersNextEpoch` JSDocs for rationale.
         indexes = state.epochCtx.getBeaconProposersNextEpoch();
       } else {
+        // Should never happen, epoch is checked to be in bounds above
         throw Error(`Proposer duties for epoch ${epoch} not supported, current epoch ${stateEpoch}`);
       }
 
@@ -342,6 +392,7 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       // TODO: Add a flag to just send 0x00 as pubkeys since the Lodestar validator does not need them.
       const pubkeys = getPubkeysForIndices(state.validators, indexes);
 
+      const startSlot = computeStartSlotAtEpoch(stateEpoch);
       const duties: routes.validator.ProposerDuty[] = [];
       for (let i = 0; i < SLOTS_PER_EPOCH; i++) {
         duties.push({slot: startSlot + i, validatorIndex: indexes[i], pubkey: pubkeys[i]});
@@ -354,7 +405,7 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       return {
         data: duties,
         dependentRoot: toHex(dependentRoot),
-        executionOptimistic: isOptimsticBlock(head),
+        executionOptimistic: isOptimisticBlock(head),
       };
     },
 
@@ -404,7 +455,7 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       return {
         data: duties,
         dependentRoot: toHex(dependentRoot),
-        executionOptimistic: isOptimsticBlock(head),
+        executionOptimistic: isOptimisticBlock(head),
       };
     },
 
@@ -431,7 +482,7 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       // May request for an epoch that's in the future
       await waitForNextClosestEpoch();
 
-      // sync committee duties have a lookahead of 1 day. Assuming the validator only requests duties for upcomming
+      // sync committee duties have a lookahead of 1 day. Assuming the validator only requests duties for upcoming
       // epochs, the head state will very likely have the duties available for the requested epoch.
       // Note: does not support requesting past duties
       const head = chain.forkChoice.getHead();
@@ -441,12 +492,12 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
       const pubkeys = getPubkeysForIndices(state.validators, validatorIndices);
       // Ensures `epoch // EPOCHS_PER_SYNC_COMMITTEE_PERIOD <= current_epoch // EPOCHS_PER_SYNC_COMMITTEE_PERIOD + 1`
       const syncCommitteeCache = state.epochCtx.getIndexedSyncCommitteeAtEpoch(epoch);
-      const syncComitteeValidatorIndexMap = syncCommitteeCache.validatorIndexMap;
+      const syncCommitteeValidatorIndexMap = syncCommitteeCache.validatorIndexMap;
 
       const duties: routes.validator.SyncDuty[] = [];
       for (let i = 0, len = validatorIndices.length; i < len; i++) {
         const validatorIndex = validatorIndices[i];
-        const validatorSyncCommitteeIndices = syncComitteeValidatorIndexMap.get(validatorIndex);
+        const validatorSyncCommitteeIndices = syncCommitteeValidatorIndexMap.get(validatorIndex);
         if (validatorSyncCommitteeIndices) {
           duties.push({
             pubkey: pubkeys[i],
@@ -458,7 +509,7 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
 
       return {
         data: duties,
-        executionOptimistic: isOptimsticBlock(head),
+        executionOptimistic: isOptimisticBlock(head),
       };
     },
 
@@ -482,10 +533,22 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
         signedAggregateAndProofs.map(async (signedAggregateAndProof, i) => {
           try {
             // TODO: Validate in batch
-            const {indexedAttestation, committeeIndices} = await validateGossipAggregateAndProof(
+            // eslint-disable-next-line @typescript-eslint/explicit-function-return-type
+            const validateFn = () =>
+              validateGossipAggregateAndProof(
+                chain,
+                signedAggregateAndProof,
+                true // skip known attesters check
+              );
+            const {slot, beaconBlockRoot} = signedAggregateAndProof.message.aggregate.data;
+            // when a validator is configured with multiple beacon node urls, this attestation may come from another beacon node
+            // and the block hasn't been in our forkchoice since we haven't seen / processing that block
+            // see https://github.com/ChainSafe/lodestar/issues/5098
+            const {indexedAttestation, committeeIndices} = await validateGossipFnRetryUnknownRoot(
+              validateFn,
               chain,
-              signedAggregateAndProof,
-              true // skip known attesters check
+              slot,
+              beaconBlockRoot
             );
 
             chain.aggregatedAttestationPool.add(
@@ -540,12 +603,15 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
         contributionAndProofs.map(async (contributionAndProof, i) => {
           try {
             // TODO: Validate in batch
-            const {syncCommitteeParticipants} = await validateSyncCommitteeGossipContributionAndProof(
+            const {syncCommitteeParticipantIndices} = await validateSyncCommitteeGossipContributionAndProof(
               chain,
               contributionAndProof,
               true // skip known participants check
             );
-            chain.syncContributionAndProofPool.add(contributionAndProof.message, syncCommitteeParticipants);
+            chain.syncContributionAndProofPool.add(
+              contributionAndProof.message,
+              syncCommitteeParticipantIndices.length
+            );
             await network.gossip.publishContributionAndProof(contributionAndProof);
           } catch (e) {
             errors.push(e as Error);
@@ -574,7 +640,7 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
     async prepareBeaconCommitteeSubnet(subscriptions) {
       notWhileSyncing();
 
-      network.prepareBeaconCommitteeSubnet(
+      await network.prepareBeaconCommitteeSubnet(
         subscriptions.map(({validatorIndex, slot, isAggregator, committeesAtSlot, committeeIndex}) => ({
           validatorIndex: validatorIndex,
           subnet: computeSubnetForCommitteesAtSlot(slot, committeesAtSlot, committeeIndex),
@@ -622,7 +688,13 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
         }
       }
 
-      network.prepareSyncCommitteeSubnets(subs);
+      await network.prepareSyncCommitteeSubnets(subs);
+
+      if (metrics) {
+        for (const subscription of subscriptions) {
+          metrics.registerLocalValidatorInSyncCommittee(subscription.validatorIndex, subscription.untilEpoch);
+        }
+      }
     },
 
     async prepareBeaconProposer(proposers) {
@@ -652,7 +724,29 @@ export function getValidatorApi({chain, config, logger, metrics, network, sync}:
     },
 
     async registerValidator(registrations) {
-      return chain.executionBuilder?.registerValidator(registrations);
+      // should only send active or pending validator to builder
+      // Spec: https://ethereum.github.io/builder-specs/#/Builder/registerValidator
+      const headState = chain.getHeadState();
+      const currentEpoch = chain.clock.currentEpoch;
+
+      const filteredRegistrations = registrations.filter((registration) => {
+        const {pubkey} = registration.message;
+        const validatorIndex = headState.epochCtx.pubkey2index.get(pubkey);
+        if (validatorIndex === undefined) return false;
+
+        const validator = headState.validators.getReadonly(validatorIndex);
+        const status = getValidatorStatus(validator, currentEpoch);
+        return (
+          status === "active" ||
+          status === "active_exiting" ||
+          status === "active_ongoing" ||
+          status === "active_slashed" ||
+          status === "pending_initialized" ||
+          status === "pending_queued"
+        );
+      });
+
+      return chain.executionBuilder?.registerValidator(filteredRegistrations);
     },
   };
 }

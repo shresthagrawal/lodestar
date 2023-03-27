@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import got from "got";
 import {SLOTS_PER_EPOCH, ForkName} from "@lodestar/params";
-import {getClient} from "@lodestar/api";
+import {ApiError, getClient} from "@lodestar/api";
 import {getStateTypeFromBytes} from "@lodestar/beacon-node";
-import {IChainConfig, IChainForkConfig} from "@lodestar/config";
+import {ChainConfig, ChainForkConfig} from "@lodestar/config";
 import {Checkpoint} from "@lodestar/types/phase0";
-import {fromHex, callFnWhenAwait, ILogger} from "@lodestar/utils";
+import {fromHex, callFnWhenAwait, Logger} from "@lodestar/utils";
 import {BeaconStateAllForks} from "@lodestar/state-transition";
 import {parseBootnodesFile} from "../util/format.js";
 import * as mainnet from "./mainnet.js";
@@ -14,18 +14,26 @@ import * as gnosis from "./gnosis.js";
 import * as goerli from "./goerli.js";
 import * as ropsten from "./ropsten.js";
 import * as sepolia from "./sepolia.js";
+import * as chiado from "./chiado.js";
+import * as zhejiang from "./zhejiang.js";
 
-export type NetworkName = "mainnet" | "dev" | "gnosis" | "goerli" | "ropsten" | "sepolia";
+export type NetworkName = "mainnet" | "dev" | "gnosis" | "goerli" | "ropsten" | "sepolia" | "chiado" | "zhejiang";
 export const networkNames: NetworkName[] = [
   "mainnet",
   "gnosis",
   "goerli",
   "ropsten",
   "sepolia",
+  "chiado",
+  "zhejiang",
 
   // Leave always as last network. The order matters for the --help printout
   "dev",
 ];
+
+export function isKnownNetworkName(network: string): network is NetworkName {
+  return networkNames.includes(network as NetworkName);
+}
 
 export type WeakSubjectivityFetchOptions = {
   weakSubjectivityServerUrl: string;
@@ -38,7 +46,7 @@ const GET_STATE_LOG_INTERVAL = 30 * 1000;
 export function getNetworkData(
   network: NetworkName
 ): {
-  chainConfig: IChainConfig;
+  chainConfig: ChainConfig;
   depositContractDeployBlock: number;
   genesisFileUrl: string | null;
   bootnodesFileUrl: string | null;
@@ -57,12 +65,16 @@ export function getNetworkData(
       return ropsten;
     case "sepolia":
       return sepolia;
+    case "chiado":
+      return chiado;
+    case "zhejiang":
+      return zhejiang;
     default:
       throw Error(`Network not supported: ${network}`);
   }
 }
 
-export function getNetworkBeaconParams(network: NetworkName): IChainConfig {
+export function getNetworkBeaconParams(network: NetworkName): ChainConfig {
   return getNetworkData(network).chainConfig;
 }
 
@@ -123,8 +135,8 @@ export function readBootnodes(bootnodesFilePath: string): string[] {
  * Fetch weak subjectivity state from a remote beacon node
  */
 export async function fetchWeakSubjectivityState(
-  config: IChainForkConfig,
-  logger: ILogger,
+  config: ChainForkConfig,
+  logger: Logger,
   {checkpointSyncUrl, wssCheckpoint}: {checkpointSyncUrl: string; wssCheckpoint?: string}
 ): Promise<{wsState: BeaconStateAllForks; wsCheckpoint: Checkpoint}> {
   try {
@@ -133,10 +145,9 @@ export async function fetchWeakSubjectivityState(
     if (wssCheckpoint) {
       wsCheckpoint = getCheckpointFromArg(wssCheckpoint);
     } else {
-      const {
-        data: {finalized},
-      } = await api.beacon.getStateFinalityCheckpoints("head");
-      wsCheckpoint = finalized;
+      const res = await api.beacon.getStateFinalityCheckpoints("head");
+      ApiError.assert(res, "Can not fetch finalized checkpoint");
+      wsCheckpoint = res.response.data.finalized;
     }
     const stateSlot = wsCheckpoint.epoch * SLOTS_PER_EPOCH;
     const getStatePromise =
@@ -148,11 +159,17 @@ export async function fetchWeakSubjectivityState(
       getStatePromise,
       () => logger.info("Download in progress, please wait..."),
       GET_STATE_LOG_INTERVAL
-    );
+    ).then((res) => {
+      ApiError.assert(res, "Can not fetch state from beacon node");
+      return res.response;
+    });
 
     logger.info("Download completed");
 
-    return {wsState: getStateTypeFromBytes(config, stateBytes).deserializeToViewDU(stateBytes), wsCheckpoint};
+    return {
+      wsState: getStateTypeFromBytes(config, stateBytes).deserializeToViewDU(stateBytes),
+      wsCheckpoint,
+    };
   } catch (e) {
     throw new Error("Unable to fetch weak subjectivity state: " + (e as Error).message);
   }

@@ -1,183 +1,176 @@
-import {mkdir, writeFile} from "node:fs/promises";
-import {dirname, join} from "node:path";
+/* eslint-disable @typescript-eslint/naming-convention */
+import {writeFile} from "node:fs/promises";
+import path from "node:path";
 import got from "got";
-import {Keystore} from "@chainsafe/bls-keystore";
-import {nodeUtils} from "@lodestar/beacon-node/node";
+import {getClient} from "@lodestar/api/beacon";
+import {getClient as keyManagerGetClient} from "@lodestar/api/keymanager";
+import {chainConfigToJson} from "@lodestar/config";
 import {LogLevel} from "@lodestar/utils";
-import {IBeaconArgs} from "../../../../src/cmds/beacon/options.js";
+import {BeaconArgs} from "../../../../src/cmds/beacon/options.js";
 import {IValidatorCliArgs} from "../../../../src/cmds/validator/options.js";
-import {IGlobalArgs} from "../../../../src/options/globalOptions.js";
-import {JobOptions, CLClientGenerator, CLClientOptions, Runner, RunnerType, Job} from "../interfaces.js";
-import {LODESTAR_BINARY_PATH} from "../utils.js";
+import {GlobalArgs} from "../../../../src/options/globalOptions.js";
+import {LODESTAR_BINARY_PATH} from "../constants.js";
+import {CLClient, CLClientGenerator, CLClientGeneratorOptions, JobOptions, RunnerType} from "../interfaces.js";
+import {getNodePorts} from "../utils/ports.js";
 
-export const generateLodestarBeaconNode: CLClientGenerator = (opts: CLClientOptions, runner: Runner): Job => {
-  if (runner.type !== RunnerType.ChildProcess) {
-    throw new Error(`Runner "${runner.type}" not yet supported.`);
-  }
+export const generateLodestarBeaconNode: CLClientGenerator<CLClient.Lodestar> = (opts, runner) => {
+  const {address, id, config, keys, genesisTime, engineUrls, engineMock, clientOptions, nodeIndex} = opts;
   const {
-    rootDir,
-    params,
-    address,
-    restPort,
-    port,
-    id,
-    config,
-    genesisStateFilePath,
-    checkpointSyncUrl,
-    wssCheckpoint,
+    paths: {jwtsecretFilePath, rootDir, genesisFilePath, logFilePath},
   } = opts;
+  const ports = getNodePorts(nodeIndex);
 
-  const {state} = nodeUtils.initDevState(config, params.validatorClients * params.validatorsPerClient, {
-    genesisTime: params.genesisTime,
-  });
+  const rcConfigPath = path.join(rootDir, "rc_config.json");
+  const paramsPath = path.join(rootDir, "params.json");
 
   const rcConfig = ({
     network: "dev",
     preset: "minimal",
     dataDir: rootDir,
-    genesisStateFile: genesisStateFilePath,
+    genesisStateFile: genesisFilePath,
     rest: true,
-    "rest.address": address,
-    "rest.port": restPort,
+    "rest.address": "0.0.0.0",
+    "rest.port": ports.cl.httpPort,
     "rest.namespace": "*",
-    "sync.isSingleNode": params.beaconNodes === 1,
-    "network.allowPublishToZeroPeers": params.beaconNodes === 1,
-    eth1: false,
-    discv5: params.beaconNodes > 1,
-    "network.connectToDiscv5Bootnodes": params.beaconNodes > 1,
-    "execution.engineMock": true,
-    listenAddress: address,
-    port: port,
+    "sync.isSingleNode": false,
+    "network.allowPublishToZeroPeers": false,
+    discv5: true,
+    "network.connectToDiscv5Bootnodes": true,
+    "network.rateLimitMultiplier": 0,
+    listenAddress: "0.0.0.0",
+    port: ports.cl.port,
     metrics: false,
     bootnodes: [],
-    "params.SECONDS_PER_SLOT": String(params.secondsPerSlot),
-    "params.GENESIS_DELAY": String(params.genesisSlotsDelay),
-    "params.ALTAIR_FORK_EPOCH": String(params.altairEpoch),
-    "params.BELLATRIX_FORK_EPOCH": String(params.bellatrixEpoch),
     logPrefix: id,
-    logFormatGenesisTime: `${params.genesisTime}`,
+    logFormatGenesisTime: `${genesisTime}`,
     logLevel: LogLevel.debug,
     logFileDailyRotate: 0,
     logFile: "none",
-  } as unknown) as IBeaconArgs & IGlobalArgs;
+    "jwt-secret": jwtsecretFilePath,
+    paramsFile: paramsPath,
+    ...clientOptions,
+  } as unknown) as BeaconArgs & GlobalArgs;
 
-  if (checkpointSyncUrl) {
-    rcConfig["checkpointSyncUrl"] = checkpointSyncUrl;
-  }
-
-  if (wssCheckpoint) {
-    rcConfig["wssCheckpoint"] = wssCheckpoint;
+  if (engineMock) {
+    rcConfig["eth1"] = false;
+    rcConfig["execution.engineMock"] = true;
+    rcConfig["execution.urls"] = [];
+  } else {
+    rcConfig["eth1"] = true;
+    rcConfig["execution.engineMock"] = false;
+    rcConfig["execution.urls"] = [...engineUrls];
   }
 
   const validatorClientsJobs: JobOptions[] = [];
-  if (opts.secretKeys.length > 0) {
-    for (let clientIndex = 0; clientIndex < params.validatorClients; clientIndex += 1) {
-      validatorClientsJobs.push(
-        generateLodestarValidatorJobs(
-          {
-            ...opts,
-            rootDir: join(rootDir, `validator-${clientIndex}`),
-            id: `${id}-validator-${clientIndex}`,
-            logFilePath: join(dirname(opts.logFilePath), `${id}-validator-${clientIndex}.log`),
-          },
-          runner
-        )
-      );
-    }
+  if (keys.type !== "no-keys") {
+    validatorClientsJobs.push(
+      generateLodestarValidatorJobs({
+        ...opts,
+        id: `${id}-validator`,
+        paths: {
+          ...opts.paths,
+          logFilePath: path.join(path.dirname(logFilePath), `${id}-validator.log`),
+        },
+      })
+    );
   }
 
-  return runner.create(id, [
+  const job = runner.create([
     {
+      id,
       bootstrap: async () => {
-        await mkdir(rootDir);
-        await writeFile(join(rootDir, "genesis.ssz"), state.serialize());
-        await writeFile(join(rootDir, "rc_config.json"), JSON.stringify(rcConfig, null, 2));
+        await writeFile(rcConfigPath, JSON.stringify(rcConfig, null, 2));
+        await writeFile(paramsPath, JSON.stringify(chainConfigToJson(config), null, 2));
       },
+      type: RunnerType.ChildProcess,
       cli: {
         command: LODESTAR_BINARY_PATH,
-        args: ["beacon", "--rcConfig", join(rootDir, "rc_config.json")],
+        args: ["beacon", "--rcConfig", rcConfigPath, "--paramsFile", paramsPath],
         env: {
-          // eslint-disable-next-line @typescript-eslint/naming-convention
-          DEBUG: "*,-winston:*",
+          DEBUG: process.env.DISABLE_DEBUG_LOGS ? "" : "*,-winston:*",
         },
       },
       logs: {
-        stdoutFilePath: opts.logFilePath,
+        stdoutFilePath: logFilePath,
       },
       health: async () => {
         try {
-          await got.get(`http://${address}:${restPort}/eth/v1/node/health`);
-          return true;
-        } catch {
-          return false;
+          await got.get(`http://${address}:${ports.cl.httpPort}/eth/v1/node/health`);
+          return {ok: true};
+        } catch (err) {
+          return {ok: false, reason: (err as Error).message, checkId: "eth/v1/node/health query"};
         }
       },
       children: validatorClientsJobs,
     },
   ]);
+
+  return {
+    id,
+    client: CLClient.Lodestar,
+    url: `http://127.0.0.1:${ports.cl.httpPort}`,
+    keys,
+    api: getClient({baseUrl: `http://127.0.0.1:${ports.cl.httpPort}`}, {config}),
+    keyManager: keyManagerGetClient({baseUrl: `http://127.0.0.1:${ports.cl.keymanagerPort}`}, {config}),
+    job,
+  };
 };
 
-export const generateLodestarValidatorJobs = (opts: CLClientOptions, runner: Runner): JobOptions => {
-  if (runner.type !== RunnerType.ChildProcess) {
-    throw new Error(`Runner "${runner.type}" not yet supported.`);
-  }
+export const generateLodestarValidatorJobs = (opts: CLClientGeneratorOptions): JobOptions => {
+  const {paths, id, keys, config, genesisTime, nodeIndex} = opts;
+  const {rootDir, keystoresDir, keystoresSecretFilePath, logFilePath} = paths;
+  const ports = getNodePorts(nodeIndex);
 
-  const {rootDir, id, address, params, keyManagerPort, secretKeys, restPort} = opts;
+  if (keys.type === "no-keys") {
+    throw Error("Attempting to run a vc with keys.type == 'no-keys'");
+  }
 
   const rcConfig = ({
     network: "dev",
     preset: "minimal",
     dataDir: rootDir,
-    server: `http://${address}:${restPort}/`,
+    server: `http://0.0.0.0:${ports.cl.httpPort}/`,
     keymanager: true,
     "keymanager.authEnabled": false,
-    "keymanager.address": address,
-    "keymanager.port": keyManagerPort,
-    "params.SECONDS_PER_SLOT": String(params.secondsPerSlot),
-    "params.GENESIS_DELAY": String(params.genesisSlotsDelay),
-    "params.ALTAIR_FORK_EPOCH": String(params.altairEpoch),
-    "params.BELLATRIX_FORK_EPOCH": String(params.bellatrixEpoch),
+    "keymanager.address": "127.0.0.1",
+    "keymanager.port": ports.cl.keymanagerPort,
     logPrefix: id,
-    logFormatGenesisTime: params.genesisTime,
+    logFormatGenesisTime: genesisTime,
     logLevel: LogLevel.debug,
     logFile: "none",
-    importKeystores: `${rootDir}/keystores`,
-    importKeystoresPassword: `${rootDir}/password.txt`,
-  } as unknown) as IValidatorCliArgs & IGlobalArgs;
+    importKeystores: keystoresDir,
+    importKeystoresPassword: keystoresSecretFilePath,
+  } as unknown) as IValidatorCliArgs & GlobalArgs;
 
   return {
+    id,
+    type: RunnerType.ChildProcess,
     bootstrap: async () => {
-      await mkdir(rootDir);
-      await mkdir(`${rootDir}/keystores`);
-      await writeFile(join(rootDir, "password.txt"), "password");
-      await writeFile(join(rootDir, "rc_config.json"), JSON.stringify(rcConfig, null, 2));
-
-      // Split half of the keys to the keymanager
-      for (const key of secretKeys.slice(secretKeys.length * params.externalKeysPercentage)) {
-        const keystore = await Keystore.create("password", key.toBytes(), key.toPublicKey().toBytes(), "");
-        await writeFile(
-          join(rootDir, "keystores", `${key.toPublicKey().toHex()}.json`),
-          JSON.stringify(keystore.toObject(), null, 2)
-        );
-      }
+      await writeFile(path.join(rootDir, "rc_config.json"), JSON.stringify(rcConfig, null, 2));
+      await writeFile(path.join(rootDir, "params.json"), JSON.stringify(chainConfigToJson(config), null, 2));
     },
     cli: {
       command: LODESTAR_BINARY_PATH,
-      args: ["validator", "--rcConfig", join(rootDir, "rc_config.json")],
+      args: [
+        "validator",
+        "--rcConfig",
+        path.join(rootDir, "rc_config.json"),
+        "--paramsFile",
+        path.join(rootDir, "params.json"),
+      ],
       env: {
-        // eslint-disable-next-line @typescript-eslint/naming-convention
-        DEBUG: "*,-winston:*",
+        DEBUG: process.env.DISABLE_DEBUG_LOGS ? "" : "*,-winston:*",
       },
     },
     logs: {
-      stdoutFilePath: opts.logFilePath,
+      stdoutFilePath: logFilePath,
     },
     health: async () => {
       try {
-        await got.get(`http://${address}:${keyManagerPort}/eth/v1/keystores`);
-        return true;
+        await got.get(`http://127.0.0.1:${ports.cl.keymanagerPort}/eth/v1/keystores`);
+        return {ok: true};
       } catch (err) {
-        return false;
+        return {ok: false, reason: (err as Error).message, checkId: "eth/v1/keystores query"};
       }
     },
   };

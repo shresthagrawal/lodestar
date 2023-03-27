@@ -1,4 +1,4 @@
-import {getClient} from "@lodestar/api";
+import {ApiError, getClient} from "@lodestar/api";
 import {config} from "@lodestar/config/default";
 import {retry} from "@lodestar/utils";
 import {describeCliTest} from "../utils/childprocRunner.js";
@@ -23,10 +23,10 @@ describeCliTest("Run dev command", function ({spawnCli}) {
       }
     });
 
-    const beaconUrl = `http://localhost:${beaconPort}`;
+    const beaconUrl = `http://127.0.0.1:${beaconPort}`;
     const client = getClient({baseUrl: beaconUrl}, {config});
 
     // Wrap in retry since the API may not be listening yet
-    await retry(() => client.node.getHealth(), {retryDelay: 1000, retries: 60});
+    await retry(() => client.node.getHealth().then((res) => ApiError.assert(res)), {retryDelay: 1000, retries: 60});
   });
 });

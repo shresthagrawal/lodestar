@@ -1,5 +1,5 @@
 import {Api, routes} from "@lodestar/api";
-import {ILogger} from "@lodestar/utils";
+import {Logger} from "@lodestar/utils";
 import {Slot, Root, RootHex} from "@lodestar/types";
 import {GENESIS_SLOT} from "@lodestar/params";
 import {fromHexString} from "@chainsafe/ssz";
@@ -25,13 +25,13 @@ export class ChainHeaderTracker {
   private readonly fns: RunEveryFn[] = [];
 
   constructor(
-    private readonly logger: ILogger,
+    private readonly logger: Logger,
     private readonly api: Api,
     private readonly emitter: ValidatorEventEmitter
   ) {}
 
   start(signal: AbortSignal): void {
-    this.api.events.eventstream([EventType.head], signal, this.onHeadUpdate);
+    void this.api.events.eventstream([EventType.head], signal, this.onHeadUpdate);
     this.logger.verbose("Subscribed to head event");
   }
 
@@ -70,7 +70,7 @@ export class ChainHeaderTracker {
       this.logger.verbose("Found new chain head", {
         slot: slot,
         head: block,
-        previouDuty: previousDutyDependentRoot,
+        previousDuty: previousDutyDependentRoot,
         currentDuty: currentDutyDependentRoot,
       });
     }

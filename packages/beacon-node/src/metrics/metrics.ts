@@ -1,23 +1,23 @@
-import {collectDefaultMetrics, Metric, Registry} from "prom-client";
-import gcStats from "prometheus-gc-stats";
-import {ILogger} from "@lodestar/utils";
+import {Metric, Registry} from "prom-client";
+import {Logger} from "@lodestar/utils";
 import {BeaconStateAllForks, getCurrentSlot} from "@lodestar/state-transition";
-import {IChainForkConfig} from "@lodestar/config";
-import {createBeaconMetrics, IBeaconMetrics} from "./metrics/beacon.js";
-import {createLodestarMetrics, ILodestarMetrics} from "./metrics/lodestar.js";
+import {ChainForkConfig} from "@lodestar/config";
+import {createBeaconMetrics, BeaconMetrics} from "./metrics/beacon.js";
+import {createLodestarMetrics, LodestarMetrics} from "./metrics/lodestar.js";
 import {MetricsOptions} from "./options.js";
 import {RegistryMetricCreator} from "./utils/registryMetricCreator.js";
-import {createValidatorMonitor, IValidatorMonitor} from "./validatorMonitor.js";
+import {createValidatorMonitor, ValidatorMonitor} from "./validatorMonitor.js";
+import {collectNodeJSMetrics} from "./nodeJsMetrics.js";
 
-export type IMetrics = IBeaconMetrics & ILodestarMetrics & IValidatorMonitor & {register: RegistryMetricCreator};
+export type Metrics = BeaconMetrics & LodestarMetrics & ValidatorMonitor & {register: RegistryMetricCreator};
 
 export function createMetrics(
   opts: MetricsOptions,
-  config: IChainForkConfig,
+  config: ChainForkConfig,
   anchorState: BeaconStateAllForks,
-  logger: ILogger,
+  logger: Logger,
   externalRegistries: Registry[] = []
-): IMetrics {
+): Metrics {
   const register = new RegistryMetricCreator();
   const beacon = createBeaconMetrics(register);
   const lodestar = createLodestarMetrics(register, opts.metadata, anchorState);
@@ -30,7 +30,7 @@ export function createMetrics(
     validatorMonitor.scrapeMetrics(clockSlot);
   });
   process.on("unhandledRejection", (_error) => {
-    lodestar.unhandeledPromiseRejections.inc();
+    lodestar.unhandledPromiseRejections.inc();
   });
 
   collectNodeJSMetrics(register);
@@ -48,18 +48,4 @@ export function createMetrics(
     ...validatorMonitor,
     register,
   };
-}
-
-export function collectNodeJSMetrics(register: Registry): void {
-  collectDefaultMetrics({
-    register,
-    // eventLoopMonitoringPrecision with sampling rate in milliseconds
-    eventLoopMonitoringPrecision: 10,
-  });
-
-  // Collects GC metrics using a native binding module
-  // - nodejs_gc_runs_total: Counts the number of time GC is invoked
-  // - nodejs_gc_pause_seconds_total: Time spent in GC in seconds
-  // - nodejs_gc_reclaimed_bytes_total: The number of bytes GC has freed
-  gcStats(register)();
 }

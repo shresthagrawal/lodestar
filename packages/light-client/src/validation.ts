@@ -1,4 +1,4 @@
-import {altair, Root, Slot, ssz} from "@lodestar/types";
+import {altair, Root, Slot, ssz, allForks} from "@lodestar/types";
 import bls from "@chainsafe/bls/switchable";
 import type {PublicKey, Signature} from "@chainsafe/bls/types";
 import {
@@ -9,7 +9,7 @@ import {
   MIN_SYNC_COMMITTEE_PARTICIPANTS,
   DOMAIN_SYNC_COMMITTEE,
 } from "@lodestar/params";
-import {IBeaconConfig} from "@lodestar/config";
+import {BeaconConfig} from "@lodestar/config";
 import {isValidMerkleBranch} from "./utils/verifyMerkleBranch.js";
 import {assertZeroHashes, getParticipantPubkeys, isEmptyHeader} from "./utils/utils.js";
 import {SyncCommitteeFast} from "./types.js";
@@ -21,11 +21,11 @@ import {computeSyncPeriodAtSlot} from "./utils/clock.js";
  * @param syncCommittee the sync committee update
  * @param update the light client update for validation
  */
-export async function assertValidLightClientUpdate(
-  config: IBeaconConfig,
+export function assertValidLightClientUpdate(
+  config: BeaconConfig,
   syncCommittee: SyncCommitteeFast,
-  update: altair.LightClientUpdate
-): Promise<void> {
+  update: allForks.LightClientUpdate
+): void {
   // DIFF FROM SPEC: An update with the same header.slot can be valid and valuable to the lightclient
   // It may have more consensus and result in a better snapshot whilst not advancing the state
   // ----
@@ -49,8 +49,8 @@ export async function assertValidLightClientUpdate(
   assertValidSyncCommitteeProof(update);
 
   const {attestedHeader} = update;
-  const headerBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(attestedHeader);
-  await assertValidSignedHeader(config, syncCommittee, update.syncAggregate, headerBlockRoot, attestedHeader.slot);
+  const headerBlockRoot = ssz.phase0.BeaconBlockHeader.hashTreeRoot(attestedHeader.beacon);
+  assertValidSignedHeader(config, syncCommittee, update.syncAggregate, headerBlockRoot, attestedHeader.beacon.slot);
 }
 
 /**
@@ -65,21 +65,21 @@ export async function assertValidLightClientUpdate(
  *
  * Where `hashTreeRoot(state) == update.finalityHeader.stateRoot`
  */
-export function assertValidFinalityProof(update: altair.LightClientFinalityUpdate): void {
+export function assertValidFinalityProof(update: allForks.LightClientFinalityUpdate): void {
   if (
     !isValidMerkleBranch(
-      ssz.phase0.BeaconBlockHeader.hashTreeRoot(update.finalizedHeader),
+      ssz.phase0.BeaconBlockHeader.hashTreeRoot(update.finalizedHeader.beacon),
       update.finalityBranch,
       FINALIZED_ROOT_DEPTH,
       FINALIZED_ROOT_INDEX,
-      update.attestedHeader.stateRoot
+      update.attestedHeader.beacon.stateRoot
     )
   ) {
     throw Error("Invalid finality header merkle branch");
   }
 
-  const updatePeriod = computeSyncPeriodAtSlot(update.attestedHeader.slot);
-  const updateFinalityPeriod = computeSyncPeriodAtSlot(update.finalizedHeader.slot);
+  const updatePeriod = computeSyncPeriodAtSlot(update.attestedHeader.beacon.slot);
+  const updateFinalityPeriod = computeSyncPeriodAtSlot(update.finalizedHeader.beacon.slot);
   if (updateFinalityPeriod !== updatePeriod) {
     throw Error(`finalityHeader period ${updateFinalityPeriod} != header period ${updatePeriod}`);
   }
@@ -95,14 +95,14 @@ export function assertValidFinalityProof(update: altair.LightClientFinalityUpdat
  *
  * Where `hashTreeRoot(state) == update.header.stateRoot`
  */
-export function assertValidSyncCommitteeProof(update: altair.LightClientUpdate): void {
+export function assertValidSyncCommitteeProof(update: allForks.LightClientUpdate): void {
   if (
     !isValidMerkleBranch(
       ssz.altair.SyncCommittee.hashTreeRoot(update.nextSyncCommittee),
       update.nextSyncCommitteeBranch,
       NEXT_SYNC_COMMITTEE_DEPTH,
       NEXT_SYNC_COMMITTEE_INDEX,
-      update.attestedHeader.stateRoot
+      update.attestedHeader.beacon.stateRoot
     )
   ) {
     throw Error("Invalid next sync committee merkle branch");
@@ -124,8 +124,8 @@ export function assertValidSyncCommitteeProof(update: altair.LightClientUpdate):
  * @param forkVersion ForkVersion that was used to sign the update
  * @param signedHeaderRoot Takes header root instead of the head itself to prevent re-hashing on SSE
  */
-export async function assertValidSignedHeader(
-  config: IBeaconConfig,
+export function assertValidSignedHeader(
+  config: BeaconConfig,
   syncCommittee: SyncCommitteeFast,
   syncAggregate: altair.SyncAggregate,
   signedHeaderRoot: Root,

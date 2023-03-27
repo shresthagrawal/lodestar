@@ -1,15 +1,21 @@
-import {CachedBeaconStateAllForks, computeEpochAtSlot} from "@lodestar/state-transition";
-import {allForks, bellatrix} from "@lodestar/types";
+import {
+  CachedBeaconStateAllForks,
+  computeEpochAtSlot,
+  isStateValidatorsNodesPopulated,
+} from "@lodestar/state-transition";
+import {bellatrix} from "@lodestar/types";
+import {ForkName} from "@lodestar/params";
 import {toHexString} from "@chainsafe/ssz";
 import {ProtoBlock} from "@lodestar/fork-choice";
-import {IChainForkConfig} from "@lodestar/config";
-import {ILogger} from "@lodestar/utils";
+import {ChainForkConfig} from "@lodestar/config";
+import {Logger} from "@lodestar/utils";
 import {BlockError, BlockErrorCode} from "../errors/index.js";
 import {BlockProcessOpts} from "../options.js";
 import {RegenCaller} from "../regen/index.js";
 import type {BeaconChain} from "../chain.js";
-import {ImportBlockOpts} from "./types.js";
+import {BlockInput, ImportBlockOpts} from "./types.js";
 import {POS_PANDA_MERGE_TRANSITION_BANNER} from "./utils/pandaMergeTransitionBanner.js";
+import {CAPELLA_OWL_BANNER} from "./utils/ownBanner.js";
 import {verifyBlocksStateTransitionOnly} from "./verifyBlocksStateTransitionOnly.js";
 import {verifyBlocksSignatures} from "./verifyBlocksSignatures.js";
 import {verifyBlocksExecutionPayload, SegmentExecStatus} from "./verifyBlocksExecutionPayloads.js";
@@ -28,13 +34,14 @@ import {verifyBlocksExecutionPayload, SegmentExecStatus} from "./verifyBlocksExe
 export async function verifyBlocksInEpoch(
   this: BeaconChain,
   parentBlock: ProtoBlock,
-  blocks: allForks.SignedBeaconBlock[],
+  blocksInput: BlockInput[],
   opts: BlockProcessOpts & ImportBlockOpts
 ): Promise<{
   postStates: CachedBeaconStateAllForks[];
   proposerBalanceDeltas: number[];
   segmentExecStatus: SegmentExecStatus;
 }> {
+  const blocks = blocksInput.map(({block}) => block);
   if (blocks.length === 0) {
     throw Error("Empty partiallyVerifiedBlocks");
   }
@@ -52,9 +59,20 @@ export async function verifyBlocksInEpoch(
 
   // TODO: Skip in process chain segment
   // Retrieve preState from cache (regen)
-  const preState0 = await this.regen.getPreState(block0.message, RegenCaller.processBlocksInEpoch).catch((e) => {
-    throw new BlockError(block0, {code: BlockErrorCode.PRESTATE_MISSING, error: e as Error});
-  });
+  const preState0 = await this.regen
+    .getPreState(block0.message, {dontTransferCache: false}, RegenCaller.processBlocksInEpoch)
+    .catch((e) => {
+      throw new BlockError(block0, {code: BlockErrorCode.PRESTATE_MISSING, error: e as Error});
+    });
+
+  if (!isStateValidatorsNodesPopulated(preState0)) {
+    this.logger.verbose("verifyBlocksInEpoch preState0 SSZ cache stats", {
+      cache: isStateValidatorsNodesPopulated(preState0),
+      clonedCount: preState0.clonedCount,
+      clonedCountWithTransferCache: preState0.clonedCountWithTransferCache,
+      createdWithTransferCache: preState0.createdWithTransferCache,
+    });
+  }
 
   // Ensure the state is in the same epoch as block0
   if (block0Epoch !== computeEpochAtSlot(preState0.slot)) {
@@ -64,16 +82,15 @@ export async function verifyBlocksInEpoch(
   const abortController = new AbortController();
 
   try {
-    const [{postStates, proposerBalanceDeltas}, , segmentExecStatus] = await Promise.all([
-      // Run state transition only
-      // TODO: Ensure it yields to allow flushing to workers and engine API
-      verifyBlocksStateTransitionOnly(preState0, blocks, this.metrics, abortController.signal, opts),
-
-      // All signatures at once
-      verifyBlocksSignatures(this.bls, preState0, blocks, opts),
-
+    const [segmentExecStatus, {postStates, proposerBalanceDeltas}] = await Promise.all([
       // Execution payloads
       verifyBlocksExecutionPayload(this, parentBlock, blocks, preState0, abortController.signal, opts),
+      // Run state transition only
+      // TODO: Ensure it yields to allow flushing to workers and engine API
+      verifyBlocksStateTransitionOnly(preState0, blocksInput, this.logger, this.metrics, abortController.signal, opts),
+
+      // All signatures at once
+      verifyBlocksSignatures(this.bls, this.logger, this.metrics, preState0, blocks, opts),
     ]);
 
     if (segmentExecStatus.execAborted === null && segmentExecStatus.mergeBlockFound !== null) {
@@ -82,13 +99,22 @@ export async function verifyBlocksInEpoch(
       logOnPowBlock(this.logger, this.config, segmentExecStatus.mergeBlockFound);
     }
 
+    const fromFork = this.config.getForkName(parentBlock.slot);
+    const toFork = this.config.getForkName(blocks[blocks.length - 1].message.slot);
+
+    // If transition through capella, note won't happen if CAPELLA_EPOCH = 0, will log double on re-org
+    if (fromFork !== ForkName.capella && toFork === ForkName.capella) {
+      this.logger.info(CAPELLA_OWL_BANNER);
+      this.logger.info("Activating withdrawals", {epoch: this.config.CAPELLA_FORK_EPOCH});
+    }
+
     return {postStates, proposerBalanceDeltas, segmentExecStatus};
   } finally {
     abortController.abort();
   }
 }
 
-function logOnPowBlock(logger: ILogger, config: IChainForkConfig, mergeBlock: bellatrix.BeaconBlock): void {
+function logOnPowBlock(logger: Logger, config: ChainForkConfig, mergeBlock: bellatrix.BeaconBlock): void {
   const mergeBlockHash = toHexString(config.getForkTypes(mergeBlock.slot).BeaconBlock.hashTreeRoot(mergeBlock));
   const mergeExecutionHash = toHexString(mergeBlock.body.executionPayload.blockHash);
   const mergePowHash = toHexString(mergeBlock.body.executionPayload.parentHash);

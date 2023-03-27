@@ -1,21 +1,23 @@
 import {defaultOptions, IBeaconNodeOptions} from "@lodestar/beacon-node";
-import {ICliCommandOptions} from "../../util/index.js";
+import {CliCommandOptions} from "../../util/index.js";
 
-export interface ISyncArgs {
+export type SyncArgs = {
   "sync.isSingleNode": boolean;
   "sync.disableProcessAsChainSegment": boolean;
+  "sync.disableRangeSync": boolean;
   "sync.backfillBatchSize": number;
-}
+};
 
-export function parseArgs(args: ISyncArgs): IBeaconNodeOptions["sync"] {
+export function parseArgs(args: SyncArgs): IBeaconNodeOptions["sync"] {
   return {
     isSingleNode: args["sync.isSingleNode"],
     disableProcessAsChainSegment: args["sync.disableProcessAsChainSegment"],
     backfillBatchSize: args["sync.backfillBatchSize"],
+    disableRangeSync: args["sync.disableRangeSync"],
   };
 }
 
-export const options: ICliCommandOptions<ISyncArgs> = {
+export const options: CliCommandOptions<SyncArgs> = {
   "sync.isSingleNode": {
     hidden: true,
     type: "boolean",
@@ -23,6 +25,14 @@ export const options: ICliCommandOptions<ISyncArgs> = {
       "Allow node to consider itself synced without being connected to a peer. \
 Use only for local networks with a single node, can be dangerous in regular networks.",
     defaultDescription: String(defaultOptions.sync.isSingleNode),
+    group: "sync",
+  },
+
+  "sync.disableRangeSync": {
+    hidden: true,
+    type: "boolean",
+    description: "Disable range sync completely. Should only be used for debugging or testing.",
+    defaultDescription: String(defaultOptions.sync.disableRangeSync),
     group: "sync",
   },
 

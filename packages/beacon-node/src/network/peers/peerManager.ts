@@ -1,19 +1,19 @@
-import {Libp2p} from "libp2p";
 import {Connection} from "@libp2p/interface-connection";
 import {PeerId} from "@libp2p/interface-peer-id";
 import {IDiscv5DiscoveryInputOptions} from "@chainsafe/discv5";
 import {BitArray} from "@chainsafe/ssz";
 import {SYNC_COMMITTEE_SUBNET_COUNT} from "@lodestar/params";
-import {IBeaconConfig} from "@lodestar/config";
+import {BeaconConfig} from "@lodestar/config";
 import {allForks, altair, phase0} from "@lodestar/types";
-import {ILogger} from "@lodestar/utils";
+import {Logger} from "@lodestar/utils";
 import {IBeaconChain} from "../../chain/index.js";
 import {GoodByeReasonCode, GOODBYE_KNOWN_CODES, Libp2pEvent} from "../../constants/index.js";
-import {IMetrics} from "../../metrics/index.js";
+import {Metrics} from "../../metrics/index.js";
 import {NetworkEvent, INetworkEventBus} from "../events.js";
-import {IReqResp, ReqRespMethod, RequestTypedContainer} from "../reqresp/index.js";
+import {Libp2p} from "../interface.js";
+import {IReqRespBeaconNode, ReqRespMethod, RequestTypedContainer} from "../reqresp/ReqRespBeaconNode.js";
 import {getConnection, getConnectionsMap, prettyPrintPeerId} from "../util.js";
-import {ISubnetsService} from "../subnets/index.js";
+import {SubnetsService} from "../subnets/index.js";
 import {SubnetType} from "../metadata.js";
 import {Eth2Gossipsub} from "../gossip/gossipsub.js";
 import {PeersData, PeerData} from "./peersData.js";
@@ -31,8 +31,8 @@ import {
 /** heartbeat performs regular updates such as updating reputations and performing discovery requests */
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 /** The time in seconds between PING events. We do not send a ping if the other peer has PING'd us */
-const PING_INTERVAL_INBOUND_MS = 4 * 60 * 1000 - 11 * 1000; // Offset to not ping when outbound reqs
-const PING_INTERVAL_OUTBOUND_MS = 4 * 60 * 1000;
+const PING_INTERVAL_INBOUND_MS = 15 * 1000; // Offset to not ping when outbound reqs
+const PING_INTERVAL_OUTBOUND_MS = 20 * 1000;
 /** The time in seconds between re-status's peers. */
 const STATUS_INTERVAL_MS = 5 * 60 * 1000;
 /** Expect a STATUS request from on inbound peer for some time. Afterwards the node does a request */
@@ -41,6 +41,14 @@ const STATUS_INBOUND_GRACE_PERIOD = 15 * 1000;
 const CHECK_PING_STATUS_INTERVAL = 10 * 1000;
 /** A peer is considered long connection if it's >= 1 day */
 const LONG_PEER_CONNECTION_MS = 24 * 60 * 60 * 1000;
+/**
+ * Tag peer when it's relevant and connecting to our node.
+ * When node has > maxPeer (55), libp2p randomly prune peers if we don't tag peers in use.
+ * See https://github.com/ChainSafe/lodestar/issues/4623#issuecomment-1374447934
+ **/
+const PEER_RELEVANT_TAG = "relevant";
+/** Tag value of PEER_RELEVANT_TAG */
+const PEER_RELEVANT_TAG_VALUE = 100;
 
 /**
  * Relative factor of peers that are allowed to have a negative gossipsub score without penalizing them in lodestar.
@@ -74,14 +82,14 @@ export type PeerManagerOpts = {
 
 export type PeerManagerModules = {
   libp2p: Libp2p;
-  logger: ILogger;
-  metrics: IMetrics | null;
-  reqResp: IReqResp;
+  logger: Logger;
+  metrics: Metrics | null;
+  reqResp: IReqRespBeaconNode;
   gossip: Eth2Gossipsub;
-  attnetsService: ISubnetsService;
-  syncnetsService: ISubnetsService;
+  attnetsService: SubnetsService;
+  syncnetsService: SubnetsService;
   chain: IBeaconChain;
-  config: IBeaconConfig;
+  config: BeaconConfig;
   peerRpcScores: IPeerRpcScoreStore;
   networkEventBus: INetworkEventBus;
   peersData: PeersData;
@@ -105,14 +113,14 @@ enum RelevantPeerStatus {
  */
 export class PeerManager {
   private libp2p: Libp2p;
-  private logger: ILogger;
-  private metrics: IMetrics | null;
-  private reqResp: IReqResp;
+  private logger: Logger;
+  private metrics: Metrics | null;
+  private reqResp: IReqRespBeaconNode;
   private gossipsub: Eth2Gossipsub;
-  private attnetsService: ISubnetsService;
-  private syncnetsService: ISubnetsService;
+  private attnetsService: SubnetsService;
+  private syncnetsService: SubnetsService;
   private chain: IBeaconChain;
-  private config: IBeaconConfig;
+  private config: BeaconConfig;
   private peerRpcScores: IPeerRpcScoreStore;
   /** If null, discovery is disabled */
   private discovery: PeerDiscovery | null;
@@ -329,7 +337,13 @@ export class PeerManager {
     // Peer is usable, send it to the rangeSync
     // NOTE: Peer may not be connected anymore at this point, potential race condition
     // libp2p.connectionManager.get() returns not null if there's +1 open connections with `peer`
-    if (peerData) peerData.relevantStatus = RelevantPeerStatus.relevant;
+    if (peerData && peerData.relevantStatus !== RelevantPeerStatus.relevant) {
+      this.libp2p.peerStore
+        // ttl = undefined means it's never expired
+        .tagPeer(peer, PEER_RELEVANT_TAG, {ttl: undefined, value: PEER_RELEVANT_TAG_VALUE})
+        .catch((e) => this.logger.verbose("cannot tag peer", {peerId: peer.toString()}, e as Error));
+      peerData.relevantStatus = RelevantPeerStatus.relevant;
+    }
     if (getConnection(this.libp2p.connectionManager, peer.toString())) {
       this.networkEventBus.emit(NetworkEvent.peerConnected, peer, status);
     }
@@ -406,6 +420,7 @@ export class PeerManager {
         const peerData = this.connectedPeers.get(peer.toString());
         return {
           id: peer,
+          direction: peerData?.direction ?? null,
           attnets: peerData?.metadata?.attnets ?? null,
           syncnets: peerData?.metadata?.syncnets ?? null,
           score: this.peerRpcScores.getScore(peer),
@@ -439,6 +454,14 @@ export class PeerManager {
       }
     }
 
+    // disconnect first to have more slots before we dial new peers
+    for (const [reason, peers] of peersToDisconnect) {
+      this.metrics?.peersRequestedToDisconnect.inc({reason}, peers.length);
+      for (const peer of peers) {
+        void this.goodbyeAndDisconnect(peer, GoodByeReasonCode.TOO_MANY_PEERS);
+      }
+    }
+
     if (this.discovery) {
       try {
         this.metrics?.peersRequestedToConnect.inc(peersToConnect);
@@ -448,21 +471,13 @@ export class PeerManager {
       }
     }
 
-    for (const [reason, peers] of peersToDisconnect) {
-      this.metrics?.peersRequestedToDisconnect.inc({reason}, peers.length);
-      for (const peer of peers) {
-        void this.goodbyeAndDisconnect(peer, GoodByeReasonCode.TOO_MANY_PEERS);
-      }
-    }
-
     // Prune connectedPeers map in case it leaks. It has happen in previous nodes,
     // disconnect is not always called for all peers
     if (this.connectedPeers.size > connectedPeers.length * 2) {
       const actualConnectedPeerIds = new Set(connectedPeers.map((peerId) => peerId.toString()));
-      for (const [peerIdStr, peerData] of this.connectedPeers) {
+      for (const peerIdStr of this.connectedPeers.keys()) {
         if (!actualConnectedPeerIds.has(peerIdStr)) {
           this.connectedPeers.delete(peerIdStr);
-          this.reqResp.pruneOnPeerDisconnect(peerData.peerId);
         }
       }
     }
@@ -519,51 +534,53 @@ export class PeerManager {
     const libp2pConnection = evt.detail;
     const {direction, status} = libp2pConnection.stat;
     const peer = libp2pConnection.remotePeer;
-
-    if (!this.connectedPeers.has(peer.toString())) {
-      // On connection:
-      // - Outbound connections: send a STATUS and PING request
-      // - Inbound connections: expect to be STATUS'd, schedule STATUS and PING for latter
-      // NOTE: libp2p may emit two "peer:connect" events: One for inbound, one for outbound
-      // If that happens, it's okay. Only the "outbound" connection triggers immediate action
-      const now = Date.now();
-      const peerData: PeerData = {
-        lastReceivedMsgUnixTsMs: direction === "outbound" ? 0 : now,
-        // If inbound, request after STATUS_INBOUND_GRACE_PERIOD
-        lastStatusUnixTsMs: direction === "outbound" ? 0 : now - STATUS_INTERVAL_MS + STATUS_INBOUND_GRACE_PERIOD,
-        connectedUnixTsMs: now,
-        relevantStatus: RelevantPeerStatus.Unknown,
-        direction,
-        peerId: peer,
-        metadata: null,
-        agentVersion: null,
-        agentClient: null,
-        encodingPreference: null,
-      };
-      this.connectedPeers.set(peer.toString(), peerData);
-
-      if (direction === "outbound") {
-        //this.pingAndStatusTimeouts();
-        void this.requestPing(peer);
-        void this.requestStatus(peer, this.chain.getStatus());
-      }
-
-      // AgentVersion was set in libp2p IdentifyService, 'peer:connect' event handler
-      // since it's not possible to handle it async, we have to wait for a while to set AgentVersion
-      // See https://github.com/libp2p/js-libp2p/pull/1168
-      setTimeout(async () => {
-        const agentVersionBytes = await this.libp2p.peerStore.metadataBook.getValue(peerData.peerId, "AgentVersion");
-        if (agentVersionBytes) {
-          const agentVersion = new TextDecoder().decode(agentVersionBytes) || "N/A";
-          peerData.agentVersion = agentVersion;
-          peerData.agentClient = clientFromAgentVersion(agentVersion);
-        }
-      }, 1000);
-    }
-
     this.logger.verbose("peer connected", {peer: prettyPrintPeerId(peer), direction, status});
     // NOTE: The peerConnect event is not emitted here here, but after asserting peer relevance
-    this.metrics?.peerConnectedEvent.inc({direction});
+    this.metrics?.peerConnectedEvent.inc({direction, status});
+    // libp2p may emit closed connection, we don't want to handle it
+    // see https://github.com/libp2p/js-libp2p/issues/1565
+    if (this.connectedPeers.has(peer.toString()) || status !== "OPEN") {
+      return;
+    }
+
+    // On connection:
+    // - Outbound connections: send a STATUS and PING request
+    // - Inbound connections: expect to be STATUS'd, schedule STATUS and PING for latter
+    // NOTE: libp2p may emit two "peer:connect" events: One for inbound, one for outbound
+    // If that happens, it's okay. Only the "outbound" connection triggers immediate action
+    const now = Date.now();
+    const peerData: PeerData = {
+      lastReceivedMsgUnixTsMs: direction === "outbound" ? 0 : now,
+      // If inbound, request after STATUS_INBOUND_GRACE_PERIOD
+      lastStatusUnixTsMs: direction === "outbound" ? 0 : now - STATUS_INTERVAL_MS + STATUS_INBOUND_GRACE_PERIOD,
+      connectedUnixTsMs: now,
+      relevantStatus: RelevantPeerStatus.Unknown,
+      direction,
+      peerId: peer,
+      metadata: null,
+      agentVersion: null,
+      agentClient: null,
+      encodingPreference: null,
+    };
+    this.connectedPeers.set(peer.toString(), peerData);
+
+    if (direction === "outbound") {
+      //this.pingAndStatusTimeouts();
+      void this.requestPing(peer);
+      void this.requestStatus(peer, this.chain.getStatus());
+    }
+
+    // AgentVersion was set in libp2p IdentifyService, 'peer:connect' event handler
+    // since it's not possible to handle it async, we have to wait for a while to set AgentVersion
+    // See https://github.com/libp2p/js-libp2p/pull/1168
+    setTimeout(async () => {
+      const agentVersionBytes = await this.libp2p.peerStore.metadataBook.getValue(peerData.peerId, "AgentVersion");
+      if (agentVersionBytes) {
+        const agentVersion = new TextDecoder().decode(agentVersionBytes) || "N/A";
+        peerData.agentVersion = agentVersion;
+        peerData.agentClient = clientFromAgentVersion(agentVersion);
+      }
+    }, 1000);
   };
 
   /**
@@ -579,8 +596,10 @@ export class PeerManager {
 
     this.logger.verbose("peer disconnected", {peer: prettyPrintPeerId(peer), direction, status});
     this.networkEventBus.emit(NetworkEvent.peerDisconnected, peer);
-    this.reqResp.pruneOnPeerDisconnect(peer);
     this.metrics?.peerDisconnectedEvent.inc({direction});
+    this.libp2p.peerStore
+      .unTagPeer(peer, PEER_RELEVANT_TAG)
+      .catch((e) => this.logger.verbose("cannot untag peer", {peerId: peer.toString()}, e as Error));
   };
 
   private async disconnect(peer: PeerId): Promise<void> {
@@ -610,7 +629,7 @@ export class PeerManager {
   }
 
   /** Register peer count metrics */
-  private async runPeerCountMetrics(metrics: IMetrics): Promise<void> {
+  private async runPeerCountMetrics(metrics: Metrics): Promise<void> {
     let total = 0;
 
     const peersByDirection = new Map<string, number>();
@@ -619,7 +638,14 @@ export class PeerManager {
 
     // peerLongLivedAttnets metric is a count
     metrics.peerLongLivedAttnets.reset();
+    metrics.peerScoreByClient.reset();
     metrics.peerConnectionLength.reset();
+    metrics.gossipPeer.scoreByClient.reset();
+
+    // reset client counts _for each client_ to 0
+    for (const client of Object.values(ClientKind)) {
+      peersByClient.set(client, 0);
+    }
 
     for (const connections of getConnectionsMap(this.libp2p.connectionManager).values()) {
       const openCnx = connections.find((cnx) => cnx.stat.status === "OPEN");
@@ -635,7 +661,8 @@ export class PeerManager {
 
         // TODO: Consider optimizing by doing observe in batch
         metrics.peerLongLivedAttnets.observe(attnets ? attnets.getTrueBitIndexes().length : 0);
-        metrics.peerScore.observe(this.peerRpcScores.getScore(peerId));
+        metrics.peerScoreByClient.observe({client}, this.peerRpcScores.getScore(peerId));
+        metrics.gossipPeer.scoreByClient.observe({client}, this.peerRpcScores.getGossipScore(peerId));
         metrics.peerConnectionLength.observe((now - openCnx.stat.timeline.open) / 1000);
         total++;
       }

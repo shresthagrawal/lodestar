@@ -1,7 +1,8 @@
-import querystring from "querystring";
+import qs from "qs";
 import fastify, {FastifyInstance} from "fastify";
 import Sinon from "sinon";
 import {mapValues} from "@lodestar/utils";
+import {ServerApi} from "../../src/interfaces.js";
 
 export function getTestServer(): {baseUrl: string; server: FastifyInstance} {
   const port = Math.floor(Math.random() * (65535 - 49152)) + 49152;
@@ -9,7 +10,7 @@ export function getTestServer(): {baseUrl: string; server: FastifyInstance} {
 
   const server = fastify({
     ajv: {customOptions: {coerceTypes: "array"}},
-    querystringParser: querystring.parse,
+    querystringParser: (str) => qs.parse(str, {comma: true}),
   });
 
   server.addHook("onError", (request, reply, error, done) => {
@@ -40,6 +41,6 @@ export function getTestServer(): {baseUrl: string; server: FastifyInstance} {
 /** Type helper to get a Sinon mock object type with Api */
 export function getMockApi<Api extends Record<string, any>>(
   routeIds: Record<string, any>
-): Sinon.SinonStubbedInstance<Api> & Api {
-  return mapValues(routeIds, () => Sinon.stub()) as Sinon.SinonStubbedInstance<Api> & Api;
+): Sinon.SinonStubbedInstance<ServerApi<Api>> & ServerApi<Api> {
+  return mapValues(routeIds, () => Sinon.stub()) as Sinon.SinonStubbedInstance<ServerApi<Api>> & ServerApi<Api>;
 }

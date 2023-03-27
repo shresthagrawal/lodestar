@@ -1,9 +1,8 @@
 import {computeEpochAtSlot} from "@lodestar/state-transition";
 import {BLSPubkey, Epoch, RootHex, Slot} from "@lodestar/types";
 import {toHexString} from "@chainsafe/ssz";
-import {Api, routes} from "@lodestar/api";
-import {extendError} from "@lodestar/utils";
-import {IClock, differenceHex, ILoggerVc} from "../util/index.js";
+import {Api, ApiError, routes} from "@lodestar/api";
+import {IClock, differenceHex, LoggerVc} from "../util/index.js";
 import {PubkeyHex} from "../types.js";
 import {Metrics} from "../metrics.js";
 import {ValidatorStore} from "./validatorStore.js";
@@ -25,7 +24,7 @@ export class BlockDutiesService {
   private readonly proposers = new Map<Epoch, BlockDutyAtEpoch>();
 
   constructor(
-    private readonly logger: ILoggerVc,
+    private readonly logger: LoggerVc,
     private readonly api: Api,
     clock: IClock,
     private readonly validatorStore: ValidatorStore,
@@ -110,7 +109,7 @@ export class BlockDutiesService {
    *
    * This sounds great, but is it safe? Firstly, the additional notification will only contain block
    * producers that were not included in the first notification. This should be safety enough.
-   * However, we also have the slashing protection as a second line of defence. These two factors
+   * However, we also have the slashing protection as a second line of defense. These two factors
    * provide an acceptable level of safety.
    *
    * It's important to note that since there is a 0-epoch look-ahead (i.e., no look-ahead) for block
@@ -152,9 +151,9 @@ export class BlockDutiesService {
       return;
     }
 
-    const proposerDuties = await this.api.validator.getProposerDuties(epoch).catch((e: Error) => {
-      throw extendError(e, "Error on getProposerDuties");
-    });
+    const res = await this.api.validator.getProposerDuties(epoch);
+    ApiError.assert(res, "Error on getProposerDuties");
+    const proposerDuties = res.response;
     const {dependentRoot} = proposerDuties;
     const relevantDuties = proposerDuties.data.filter((duty) => {
       const pubkeyHex = toHexString(duty.pubkey);

@@ -1,11 +1,10 @@
 import {EPOCHS_PER_SYNC_COMMITTEE_PERIOD, SYNC_COMMITTEE_SUBNET_SIZE} from "@lodestar/params";
 import {computeSyncPeriodAtEpoch, computeSyncPeriodAtSlot, isSyncCommitteeAggregator} from "@lodestar/state-transition";
-import {IChainForkConfig} from "@lodestar/config";
+import {ChainForkConfig} from "@lodestar/config";
 import {BLSSignature, Epoch, Slot, SyncPeriod, ValidatorIndex} from "@lodestar/types";
 import {toHexString} from "@chainsafe/ssz";
-import {Api, routes} from "@lodestar/api";
-import {extendError} from "@lodestar/utils";
-import {IClock, ILoggerVc} from "../util/index.js";
+import {Api, ApiError, routes} from "@lodestar/api";
+import {IClock, LoggerVc} from "../util/index.js";
 import {PubkeyHex} from "../types.js";
 import {Metrics} from "../metrics.js";
 import {ValidatorStore} from "./validatorStore.js";
@@ -70,8 +69,8 @@ export class SyncCommitteeDutiesService {
   private readonly dutiesByIndexByPeriod = new Map<SyncPeriod, Map<ValidatorIndex, DutyAtPeriod>>();
 
   constructor(
-    private readonly config: IChainForkConfig,
-    private readonly logger: ILoggerVc,
+    private readonly config: ChainForkConfig,
+    private readonly logger: LoggerVc,
     private readonly api: Api,
     clock: IClock,
     private readonly validatorStore: ValidatorStore,
@@ -216,9 +215,8 @@ export class SyncCommitteeDutiesService {
     // If there are any subscriptions, push them out to the beacon node.
     if (syncCommitteeSubscriptions.length > 0) {
       // TODO: Should log or throw?
-      await this.api.validator.prepareSyncCommitteeSubnets(syncCommitteeSubscriptions).catch((e: Error) => {
-        throw extendError(e, "Failed to subscribe to sync committee subnets");
-      });
+      const res = await this.api.validator.prepareSyncCommitteeSubnets(syncCommitteeSubscriptions);
+      ApiError.assert(res, "Failed to subscribe to sync committee subnets");
     }
   }
 
@@ -231,14 +229,13 @@ export class SyncCommitteeDutiesService {
       return;
     }
 
-    const syncDuties = await this.api.validator.getSyncCommitteeDuties(epoch, indexArr).catch((e: Error) => {
-      throw extendError(e, "Failed to obtain SyncDuties");
-    });
+    const res = await this.api.validator.getSyncCommitteeDuties(epoch, indexArr);
+    ApiError.assert(res, "Failed to obtain SyncDuties");
 
     const dutiesByIndex = new Map<ValidatorIndex, DutyAtPeriod>();
     let count = 0;
 
-    for (const duty of syncDuties.data) {
+    for (const duty of res.response.data) {
       const {validatorIndex} = duty;
       if (!this.validatorStore.hasValidatorIndex(validatorIndex)) {
         continue;
@@ -247,7 +244,7 @@ export class SyncCommitteeDutiesService {
 
       // Note: For networks where `state.validators.length < SYNC_COMMITTEE_SIZE` the same validator can appear
       // multiple times in the sync committee. So `routes.validator.SyncDuty` `.validatorSyncCommitteeIndices`
-      // is an array, with all of those apparences.
+      // is an array, with all of those appearances.
       //
       // Validator signs two messages:
       // `SyncCommitteeMessage`:
@@ -255,7 +252,7 @@ export class SyncCommitteeDutiesService {
       //  - Validator signs and publishes only one message regardless of validatorSyncCommitteeIndices length
       // `SyncCommitteeContribution`:
       //  - depends on slot, blockRoot, validatorIndex, and subnet.
-      //  - Validator must sign and publish only one message per subnet MAX. Regarless of validatorSyncCommitteeIndices
+      //  - Validator must sign and publish only one message per subnet MAX. Regardless of validatorSyncCommitteeIndices
       const subnets = syncCommitteeIndicesToSubnets(duty.validatorSyncCommitteeIndices);
 
       // TODO: Enable dependentRoot functionality

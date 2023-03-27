@@ -1,36 +1,37 @@
-import {RootHex, allForks, capella} from "@lodestar/types";
-import {BYTES_PER_LOGS_BLOOM, SLOTS_PER_EPOCH} from "@lodestar/params";
-import {fromHex} from "@lodestar/utils";
+import {RootHex, allForks, Wei} from "@lodestar/types";
+import {SLOTS_PER_EPOCH, ForkName, ForkSeq} from "@lodestar/params";
 
-import {ErrorJsonRpcResponse, HttpRpcError, JsonRpcHttpClient} from "../../eth1/provider/jsonRpcHttpClient.js";
-import {
-  bytesToData,
-  numToQuantity,
-  dataToBytes,
-  quantityToNum,
-  DATA,
-  QUANTITY,
-  quantityToBigint,
-} from "../../eth1/provider/utils.js";
+import {ErrorJsonRpcResponse, HttpRpcError} from "../../eth1/provider/jsonRpcHttpClient.js";
 import {IJsonRpcHttpClient, ReqOpts} from "../../eth1/provider/jsonRpcHttpClient.js";
-import {IMetrics} from "../../metrics/index.js";
+import {Metrics} from "../../metrics/index.js";
 import {JobItemQueue} from "../../util/queue/index.js";
 import {EPOCHS_PER_BATCH} from "../../sync/constants.js";
+import {numToQuantity} from "../../eth1/provider/utils.js";
 import {
   ExecutePayloadStatus,
   ExecutePayloadResponse,
-  ForkChoiceUpdateStatus,
   IExecutionEngine,
   PayloadId,
   PayloadAttributes,
-  ApiPayloadAttributes,
   TransitionConfigurationV1,
+  BlobsBundle,
 } from "./interface.js";
 import {PayloadIdCache} from "./payloadIdCache.js";
+import {
+  EngineApiRpcParamTypes,
+  EngineApiRpcReturnTypes,
+  parseBlobsBundle,
+  parseExecutionPayload,
+  serializeExecutionPayload,
+  serializePayloadAttributes,
+  ExecutionPayloadBody,
+  assertReqSizeLimit,
+  deserializeExecutionPayloadBody,
+} from "./types.js";
 
 export type ExecutionEngineModules = {
   signal: AbortSignal;
-  metrics?: IMetrics | null;
+  metrics?: Metrics | null;
 };
 
 export type ExecutionEngineHttpOpts = {
@@ -82,7 +83,6 @@ const exchageTransitionConfigOpts: ReqOpts = {routeId: "exchangeTransitionConfig
  */
 export class ExecutionEngineHttp implements IExecutionEngine {
   readonly payloadIdCache = new PayloadIdCache();
-  private readonly rpc: IJsonRpcHttpClient;
   /**
    * A queue to serialize the fcUs and newPayloads calls:
    *
@@ -101,16 +101,10 @@ export class ExecutionEngineHttp implements IExecutionEngine {
     );
   };
 
-  constructor(opts: ExecutionEngineHttpOpts, {metrics, signal}: ExecutionEngineModules) {
-    this.rpc = new JsonRpcHttpClient(opts.urls, {
-      ...opts,
-      signal,
-      metrics: metrics?.executionEnginerHttpClient,
-      jwtSecret: opts.jwtSecretHex ? fromHex(opts.jwtSecretHex) : undefined,
-    });
+  constructor(private readonly rpc: IJsonRpcHttpClient, {metrics, signal}: ExecutionEngineModules) {
     this.rpcFetchQueue = new JobItemQueue<[EngineRequest], EngineResponse>(
       this.jobQueueProcessor,
-      {maxLength: QUEUE_MAX_LENGTH, maxConcurrency: 1, signal},
+      {maxLength: QUEUE_MAX_LENGTH, maxConcurrency: 1, noYieldIfOneItem: true, signal},
       metrics?.engineHttpProcessorQueue
     );
   }
@@ -140,9 +134,14 @@ export class ExecutionEngineHttp implements IExecutionEngine {
    *
    * If any of the above fails due to errors unrelated to the normal processing flow of the method, client software MUST respond with an error object.
    */
-  async notifyNewPayload(executionPayload: allForks.ExecutionPayload): Promise<ExecutePayloadResponse> {
-    const method = "engine_newPayloadV1";
-    const serializedExecutionPayload = serializeExecutionPayload(executionPayload);
+  async notifyNewPayload(fork: ForkName, executionPayload: allForks.ExecutionPayload): Promise<ExecutePayloadResponse> {
+    const method =
+      ForkSeq[fork] >= ForkSeq.deneb
+        ? "engine_newPayloadV3"
+        : ForkSeq[fork] >= ForkSeq.capella
+        ? "engine_newPayloadV2"
+        : "engine_newPayloadV1";
+    const serializedExecutionPayload = serializeExecutionPayload(fork, executionPayload);
     const {status, latestValidHash, validationError} = await (this.rpcFetchQueue.push({
       method,
       params: [serializedExecutionPayload],
@@ -222,42 +221,42 @@ export class ExecutionEngineHttp implements IExecutionEngine {
    * If any of the above fails due to errors unrelated to the normal processing flow of the method, client software MUST respond with an error object.
    */
   async notifyForkchoiceUpdate(
+    fork: ForkName,
     headBlockHash: RootHex,
     safeBlockHash: RootHex,
     finalizedBlockHash: RootHex,
     payloadAttributes?: PayloadAttributes
   ): Promise<PayloadId | null> {
-    const method = "engine_forkchoiceUpdatedV1";
-    const apiPayloadAttributes: ApiPayloadAttributes | undefined = payloadAttributes
-      ? {
-          timestamp: numToQuantity(payloadAttributes.timestamp),
-          prevRandao: bytesToData(payloadAttributes.prevRandao),
-          suggestedFeeRecipient: payloadAttributes.suggestedFeeRecipient,
-        }
-      : undefined;
-
+    // Once on capella, should this need to be permanently switched to v2 when payload attrs
+    // not provided
+    const method = ForkSeq[fork] >= ForkSeq.capella ? "engine_forkchoiceUpdatedV2" : "engine_forkchoiceUpdatedV1";
+    const payloadAttributesRpc = payloadAttributes ? serializePayloadAttributes(payloadAttributes) : undefined;
     // If we are just fcUing and not asking execution for payload, retry is not required
     // and we can move on, as the next fcU will be issued soon on the new slot
     const fcUReqOpts =
       payloadAttributes !== undefined ? forkchoiceUpdatedV1Opts : {...forkchoiceUpdatedV1Opts, retryAttempts: 1};
+
+    const request = this.rpcFetchQueue.push({
+      method,
+      params: [{headBlockHash, safeBlockHash, finalizedBlockHash}, payloadAttributesRpc],
+      methodOpts: fcUReqOpts,
+    }) as Promise<EngineApiRpcReturnTypes[typeof method]>;
+
+    const response = await request;
     const {
       payloadStatus: {status, latestValidHash: _latestValidHash, validationError},
       payloadId,
-    } = await (this.rpcFetchQueue.push({
-      method,
-      params: [{headBlockHash, safeBlockHash, finalizedBlockHash}, apiPayloadAttributes],
-      methodOpts: fcUReqOpts,
-    }) as Promise<EngineApiRpcReturnTypes[typeof method]>);
+    } = response;
 
     switch (status) {
       case ExecutePayloadStatus.VALID:
         // if payloadAttributes are provided, a valid payloadId is expected
-        if (apiPayloadAttributes) {
+        if (payloadAttributesRpc) {
           if (!payloadId || payloadId === "0x") {
             throw Error(`Received invalid payloadId=${payloadId}`);
           }
 
-          this.payloadIdCache.add({headBlockHash, finalizedBlockHash, ...apiPayloadAttributes}, payloadId);
+          this.payloadIdCache.add({headBlockHash, finalizedBlockHash, ...payloadAttributesRpc}, payloadId);
           void this.prunePayloadIdCache();
         }
         return payloadId !== "0x" ? payloadId : null;
@@ -289,9 +288,17 @@ export class ExecutionEngineHttp implements IExecutionEngine {
    * 2. The call MUST be responded with 5: Unavailable payload error if the building process identified by the payloadId doesn't exist.
    * 3. Client software MAY stop the corresponding building process after serving this call.
    */
-  async getPayload(payloadId: PayloadId): Promise<allForks.ExecutionPayload> {
-    const method = "engine_getPayloadV1";
-    const executionPayloadRpc = await this.rpc.fetchWithRetries<
+  async getPayload(
+    fork: ForkName,
+    payloadId: PayloadId
+  ): Promise<{executionPayload: allForks.ExecutionPayload; blockValue: Wei}> {
+    const method =
+      ForkSeq[fork] >= ForkSeq.deneb
+        ? "engine_getPayloadV3"
+        : ForkSeq[fork] >= ForkSeq.capella
+        ? "engine_getPayloadV2"
+        : "engine_getPayloadV1";
+    const payloadResponse = await this.rpc.fetchWithRetries<
       EngineApiRpcReturnTypes[typeof method],
       EngineApiRpcParamTypes[typeof method]
     >(
@@ -301,7 +308,23 @@ export class ExecutionEngineHttp implements IExecutionEngine {
       },
       getPayloadOpts
     );
-    return parseExecutionPayload(executionPayloadRpc);
+    return parseExecutionPayload(fork, payloadResponse);
+  }
+
+  async getBlobsBundle(payloadId: PayloadId): Promise<BlobsBundle> {
+    const method = "engine_getBlobsBundleV1";
+    const blobsBundle = await this.rpc.fetchWithRetries<
+      EngineApiRpcReturnTypes[typeof method],
+      EngineApiRpcParamTypes[typeof method]
+    >(
+      {
+        method,
+        params: [payloadId],
+      },
+      getPayloadOpts
+    );
+
+    return parseBlobsBundle(blobsBundle);
   }
 
   /**
@@ -314,10 +337,7 @@ export class ExecutionEngineHttp implements IExecutionEngine {
     transitionConfiguration: TransitionConfigurationV1
   ): Promise<TransitionConfigurationV1> {
     const method = "engine_exchangeTransitionConfigurationV1";
-    return await this.rpc.fetchWithRetries<
-      EngineApiRpcReturnTypes[typeof method],
-      EngineApiRpcParamTypes[typeof method]
-    >(
+    return this.rpc.fetchWithRetries<EngineApiRpcReturnTypes[typeof method], EngineApiRpcParamTypes[typeof method]>(
       {
         method,
         params: [transitionConfiguration],
@@ -329,118 +349,37 @@ export class ExecutionEngineHttp implements IExecutionEngine {
   async prunePayloadIdCache(): Promise<void> {
     this.payloadIdCache.prune();
   }
-}
 
-/* eslint-disable @typescript-eslint/naming-convention */
-
-type EngineApiRpcParamTypes = {
-  /**
-   * 1. Object - Instance of ExecutionPayload
-   */
-  engine_newPayloadV1: [ExecutionPayloadRpc];
-  /**
-   * 1. Object - Payload validity status with respect to the consensus rules:
-   *   - blockHash: DATA, 32 Bytes - block hash value of the payload
-   *   - status: String: VALID|INVALID - result of the payload validation with respect to the proof-of-stake consensus rules
-   */
-  engine_forkchoiceUpdatedV1: [
-    param1: {headBlockHash: DATA; safeBlockHash: DATA; finalizedBlockHash: DATA},
-    payloadAttributes?: ApiPayloadAttributes
-  ];
-  /**
-   * 1. payloadId: QUANTITY, 64 Bits - Identifier of the payload building process
-   */
-  engine_getPayloadV1: [QUANTITY];
-  /**
-   * 1. Object - Instance of TransitionConfigurationV1
-   */
-  engine_exchangeTransitionConfigurationV1: [TransitionConfigurationV1];
-};
-
-type EngineApiRpcReturnTypes = {
-  /**
-   * Object - Response object:
-   * - status: String - the result of the payload execution:
-   */
-  engine_newPayloadV1: {
-    status: ExecutePayloadStatus;
-    latestValidHash: DATA | null;
-    validationError: string | null;
-  };
-  engine_forkchoiceUpdatedV1: {
-    payloadStatus: {status: ForkChoiceUpdateStatus; latestValidHash: DATA | null; validationError: string | null};
-    payloadId: QUANTITY | null;
-  };
-  /**
-   * payloadId | Error: QUANTITY, 64 Bits - Identifier of the payload building process
-   */
-  engine_getPayloadV1: ExecutionPayloadRpc;
-  /**
-   * Object - Instance of TransitionConfigurationV1
-   */
-  engine_exchangeTransitionConfigurationV1: TransitionConfigurationV1;
-};
-
-type ExecutionPayloadRpc = {
-  parentHash: DATA; // 32 bytes
-  feeRecipient: DATA; // 20 bytes
-  stateRoot: DATA; // 32 bytes
-  receiptsRoot: DATA; // 32 bytes
-  logsBloom: DATA; // 256 bytes
-  prevRandao: DATA; // 32 bytes
-  blockNumber: QUANTITY;
-  gasLimit: QUANTITY;
-  gasUsed: QUANTITY;
-  timestamp: QUANTITY;
-  extraData: DATA; // 0 to 32 bytes
-  baseFeePerGas: QUANTITY;
-  blockHash: DATA; // 32 bytes
-  transactions: DATA[];
-  withdrawals?: DATA[]; // Capella hardfork
-};
-
-export function serializeExecutionPayload(data: allForks.ExecutionPayload): ExecutionPayloadRpc {
-  if ((data as capella.ExecutionPayload).withdrawals !== undefined) {
-    throw Error("Capella Not implemented");
+  async getPayloadBodiesByHash(blockHashes: RootHex[]): Promise<(ExecutionPayloadBody | null)[]> {
+    const method = "engine_getPayloadBodiesByHashV1";
+    assertReqSizeLimit(blockHashes.length, 32);
+    const response = await this.rpc.fetchWithRetries<
+      EngineApiRpcReturnTypes[typeof method],
+      EngineApiRpcParamTypes[typeof method]
+    >({
+      method,
+      params: blockHashes,
+    });
+    return response.map(deserializeExecutionPayloadBody);
   }
-  return {
-    parentHash: bytesToData(data.parentHash),
-    feeRecipient: bytesToData(data.feeRecipient),
-    stateRoot: bytesToData(data.stateRoot),
-    receiptsRoot: bytesToData(data.receiptsRoot),
-    logsBloom: bytesToData(data.logsBloom),
-    prevRandao: bytesToData(data.prevRandao),
-    blockNumber: numToQuantity(data.blockNumber),
-    gasLimit: numToQuantity(data.gasLimit),
-    gasUsed: numToQuantity(data.gasUsed),
-    timestamp: numToQuantity(data.timestamp),
-    extraData: bytesToData(data.extraData),
-    baseFeePerGas: numToQuantity(data.baseFeePerGas),
-    blockHash: bytesToData(data.blockHash),
-    transactions: data.transactions.map((tran) => bytesToData(tran)),
-  };
-}
 
-export function parseExecutionPayload(data: ExecutionPayloadRpc): allForks.ExecutionPayload {
-  if (data.withdrawals !== undefined) {
-    throw Error("Capella Not implemented");
+  async getPayloadBodiesByRange(
+    startBlockNumber: number,
+    blockCount: number
+  ): Promise<(ExecutionPayloadBody | null)[]> {
+    const method = "engine_getPayloadBodiesByRangeV1";
+    assertReqSizeLimit(blockCount, 32);
+    const start = numToQuantity(startBlockNumber);
+    const count = numToQuantity(blockCount);
+    const response = await this.rpc.fetchWithRetries<
+      EngineApiRpcReturnTypes[typeof method],
+      EngineApiRpcParamTypes[typeof method]
+    >({
+      method,
+      params: [start, count],
+    });
+    return response.map(deserializeExecutionPayloadBody);
   }
-  return {
-    parentHash: dataToBytes(data.parentHash, 32),
-    feeRecipient: dataToBytes(data.feeRecipient, 20),
-    stateRoot: dataToBytes(data.stateRoot, 32),
-    receiptsRoot: dataToBytes(data.receiptsRoot, 32),
-    logsBloom: dataToBytes(data.logsBloom, BYTES_PER_LOGS_BLOOM),
-    prevRandao: dataToBytes(data.prevRandao, 32),
-    blockNumber: quantityToNum(data.blockNumber),
-    gasLimit: quantityToNum(data.gasLimit),
-    gasUsed: quantityToNum(data.gasUsed),
-    timestamp: quantityToNum(data.timestamp),
-    extraData: dataToBytes(data.extraData),
-    baseFeePerGas: quantityToBigint(data.baseFeePerGas),
-    blockHash: dataToBytes(data.blockHash, 32),
-    transactions: data.transactions.map((tran) => dataToBytes(tran)),
-  };
 }
 
 type EngineRequestKey = keyof EngineApiRpcParamTypes;

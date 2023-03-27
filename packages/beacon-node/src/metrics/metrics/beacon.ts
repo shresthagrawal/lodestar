@@ -1,13 +1,13 @@
 import {RegistryMetricCreator} from "../utils/registryMetricCreator.js";
 
-export type IBeaconMetrics = ReturnType<typeof createBeaconMetrics>;
+export type BeaconMetrics = ReturnType<typeof createBeaconMetrics>;
 
 /**
  * Metrics from:
  * https://github.com/ethereum/beacon-metrics/ and
  * https://hackmd.io/D5FmoeFZScim_squBFl8oA
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/explicit-function-return-type
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function createBeaconMetrics(register: RegistryMetricCreator) {
   return {
     // From https://github.com/ethereum/beacon-metrics/blob/master/metrics.md
@@ -96,61 +96,34 @@ export function createBeaconMetrics(register: RegistryMetricCreator) {
     }),
 
     reqResp: {
-      outgoingRequests: register.gauge<"method">({
-        name: "beacon_reqresp_outgoing_requests_total",
-        help: "Counts total requests done per method",
-        labelNames: ["method"],
-      }),
-      outgoingRequestRoundtripTime: register.histogram<"method">({
-        name: "beacon_reqresp_outgoing_request_roundtrip_time_seconds",
-        help: "Histogram of outgoing requests round-trip time",
-        labelNames: ["method"],
-        buckets: [0.1, 0.2, 0.5, 1, 5, 15, 60],
-      }),
-      outgoingErrors: register.gauge<"method">({
-        name: "beacon_reqresp_outgoing_requests_error_total",
-        help: "Counts total failed requests done per method",
-        labelNames: ["method"],
-      }),
-      incomingRequests: register.gauge<"method">({
-        name: "beacon_reqresp_incoming_requests_total",
-        help: "Counts total responses handled per method",
-        labelNames: ["method"],
-      }),
-      incomingRequestHandlerTime: register.histogram<"method">({
-        name: "beacon_reqresp_incoming_request_handler_time_seconds",
-        help: "Histogram of incoming requests internal handling time",
-        labelNames: ["method"],
-        buckets: [0.1, 0.2, 0.5, 1, 5],
-      }),
-      incomingErrors: register.gauge<"method">({
-        name: "beacon_reqresp_incoming_requests_error_total",
-        help: "Counts total failed responses handled per method",
-        labelNames: ["method"],
-      }),
-      dialErrors: register.gauge({
-        name: "beacon_reqresp_dial_errors_total",
-        help: "Count total dial errors",
-      }),
-      rateLimitErrors: register.gauge<"tracker">({
+      rateLimitErrors: register.gauge<"method">({
         name: "beacon_reqresp_rate_limiter_errors_total",
         help: "Count rate limiter errors",
-        labelNames: ["tracker"],
+        labelNames: ["method"],
       }),
     },
 
-    blockProductionTime: register.histogram({
+    blockProductionTime: register.histogram<"source">({
       name: "beacon_block_production_seconds",
       help: "Full runtime of block production",
-      buckets: [0.1, 1, 10],
+      buckets: [0.1, 1, 2, 4, 10],
+      labelNames: ["source"],
     }),
-    blockProductionRequests: register.gauge({
+    blockProductionRequests: register.gauge<"source">({
       name: "beacon_block_production_requests_total",
       help: "Count of all block production requests",
+      labelNames: ["source"],
     }),
-    blockProductionSuccess: register.gauge({
+    blockProductionSuccess: register.gauge<"source">({
       name: "beacon_block_production_successes_total",
       help: "Count of blocks successfully produced",
+      labelNames: ["source"],
+    }),
+    blockProductionNumAggregated: register.histogram<"source">({
+      name: "beacon_block_production_num_aggregated_total",
+      help: "Count of all aggregated attestations in our produced block",
+      buckets: [32, 64, 96, 128],
+      labelNames: ["source"],
     }),
 
     blockPayload: {
@@ -179,6 +152,10 @@ export function createBeaconMetrics(register: RegistryMetricCreator) {
     clockSlot: register.gauge({
       name: "beacon_clock_slot",
       help: "Current clock slot",
+    }),
+    clockEpoch: register.gauge({
+      name: "beacon_clock_epoch",
+      help: "Current clock epoch",
     }),
   };
 }

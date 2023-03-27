@@ -1,13 +1,14 @@
-import {allForks, UintNum64, Root, phase0, Slot, RootHex, Epoch, ValidatorIndex} from "@lodestar/types";
+import {allForks, UintNum64, Root, phase0, Slot, RootHex, Epoch, ValidatorIndex, deneb, Wei} from "@lodestar/types";
 import {CachedBeaconStateAllForks} from "@lodestar/state-transition";
-import {IBeaconConfig} from "@lodestar/config";
+import {BeaconConfig} from "@lodestar/config";
 import {CompositeTypeAny, TreeView, Type} from "@chainsafe/ssz";
-import {ILogger} from "@lodestar/utils";
+import {Logger} from "@lodestar/utils";
 
 import {IForkChoice, ProtoBlock} from "@lodestar/fork-choice";
 import {IEth1ForBlockProduction} from "../eth1/index.js";
 import {IExecutionEngine, IExecutionBuilder} from "../execution/index.js";
-import {IBeaconClock} from "./clock/interface.js";
+import {Metrics} from "../metrics/metrics.js";
+import {BeaconClock} from "./clock/interface.js";
 import {ChainEventEmitter} from "./emitter.js";
 import {IStateRegenerator} from "./regen/index.js";
 import {StateContextCache, CheckpointStateCache} from "./stateCache/index.js";
@@ -22,7 +23,7 @@ import {
 import {AttestationPool, OpPool, SyncCommitteeMessagePool, SyncContributionAndProofPool} from "./opPools/index.js";
 import {LightClientServer} from "./lightClient/index.js";
 import {AggregatedAttestationPool} from "./opPools/aggregatedAttestationPool.js";
-import {ImportBlockOpts} from "./blocks/types.js";
+import {BlockInput, ImportBlockOpts} from "./blocks/types.js";
 import {ReprocessController} from "./reprocess.js";
 import {SeenAggregatedAttestations} from "./seenCache/seenAggregateAndProof.js";
 import {BeaconProposerCache, ProposerPreparationData} from "./beaconProposerCache.js";
@@ -51,15 +52,16 @@ export interface IBeaconChain {
   readonly executionEngine: IExecutionEngine;
   readonly executionBuilder?: IExecutionBuilder;
   // Expose config for convenience in modularized functions
-  readonly config: IBeaconConfig;
-  readonly logger: ILogger;
+  readonly config: BeaconConfig;
+  readonly logger: Logger;
+  readonly metrics: Metrics | null;
 
   /** The initial slot that the chain is started with */
   readonly anchorStateLatestBlockSlot: Slot;
 
   readonly bls: IBlsVerifier;
   readonly forkChoice: IForkChoice;
-  readonly clock: IBeaconClock;
+  readonly clock: BeaconClock;
   readonly emitter: ChainEventEmitter;
   readonly stateCache: StateContextCache;
   readonly checkpointStateCache: CheckpointStateCache;
@@ -86,6 +88,7 @@ export interface IBeaconChain {
 
   readonly beaconProposerCache: BeaconProposerCache;
   readonly checkpointBalancesCache: CheckpointBalancesCache;
+  readonly producedBlobsSidecarCache: Map<RootHex, deneb.BlobsSidecar>;
   readonly opts: IChainOptions;
 
   /** Stop beacon chain processing */
@@ -108,19 +111,21 @@ export interface IBeaconChain {
    */
   getCanonicalBlockAtSlot(slot: Slot): Promise<allForks.SignedBeaconBlock | null>;
 
-  produceBlock(blockAttributes: BlockAttributes): Promise<allForks.BeaconBlock>;
-  produceBlindedBlock(blockAttributes: BlockAttributes): Promise<allForks.BlindedBeaconBlock>;
+  getBlobsSidecar(beaconBlock: deneb.BeaconBlock): deneb.BlobsSidecar;
+
+  produceBlock(blockAttributes: BlockAttributes): Promise<{block: allForks.BeaconBlock; blockValue: Wei}>;
+  produceBlindedBlock(blockAttributes: BlockAttributes): Promise<{block: allForks.BlindedBeaconBlock; blockValue: Wei}>;
 
   /** Process a block until complete */
-  processBlock(block: allForks.SignedBeaconBlock, opts?: ImportBlockOpts): Promise<void>;
+  processBlock(block: BlockInput, opts?: ImportBlockOpts): Promise<void>;
   /** Process a chain of blocks until complete */
-  processChainSegment(blocks: allForks.SignedBeaconBlock[], opts?: ImportBlockOpts): Promise<void>;
+  processChainSegment(blocks: BlockInput[], opts?: ImportBlockOpts): Promise<void>;
 
   getStatus(): phase0.Status;
 
   recomputeForkChoiceHead(): ProtoBlock;
 
-  waitForBlockOfAttestation(slot: Slot, root: RootHex): Promise<boolean>;
+  waitForBlock(slot: Slot, root: RootHex): Promise<boolean>;
 
   updateBeaconProposerData(epoch: Epoch, proposers: ProposerPreparationData[]): Promise<void>;
 

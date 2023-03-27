@@ -1,5 +1,5 @@
-import {routes} from "@lodestar/api";
-import {chainConfigToJson, IChainConfig, specValuesToJson} from "@lodestar/config";
+import {routes, ServerApi} from "@lodestar/api";
+import {chainConfigToJson, ChainConfig, specValuesToJson} from "@lodestar/config";
 import {activePreset, presetToJson} from "@lodestar/params";
 import {ApiModules} from "../types.js";
 import {specConstants} from "./constants.js";
@@ -14,14 +14,14 @@ import {specConstants} from "./constants.js";
  *    [altair](https://github.com/ethereum/consensus.0-specs/blob/v1.1.10/presets/mainnet/altair.yaml) values
  *  - Configuration for the beacon node, for example the [mainnet](https://github.com/ethereum/consensus-specs/blob/v1.1.10/configs/mainnet.yaml) values
  */
-export function renderJsonSpec(config: IChainConfig): Record<string, string> {
+export function renderJsonSpec(config: ChainConfig): Record<string, string> {
   const configJson = chainConfigToJson(config);
   const presetJson = presetToJson(activePreset);
   const constantsJson = specValuesToJson(specConstants);
   return {...configJson, ...presetJson, ...constantsJson};
 }
 
-export function getConfigApi({config}: Pick<ApiModules, "config">): routes.config.Api {
+export function getConfigApi({config}: Pick<ApiModules, "config">): ServerApi<routes.config.Api> {
   return {
     async getForkSchedule() {
       const forkInfos = Object.values(config.forks);

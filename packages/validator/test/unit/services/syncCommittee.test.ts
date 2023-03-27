@@ -2,9 +2,10 @@ import {expect} from "chai";
 import sinon from "sinon";
 import bls from "@chainsafe/bls";
 import {toHexString} from "@chainsafe/ssz";
-import {createIChainForkConfig} from "@lodestar/config";
+import {createChainForkConfig} from "@lodestar/config";
 import {config as mainnetConfig} from "@lodestar/config/default";
 import {ssz} from "@lodestar/types";
+import {HttpStatusCode} from "@lodestar/api";
 import {SyncCommitteeService} from "../../../src/services/syncCommittee.js";
 import {SyncDutyAndProofs} from "../../../src/services/syncCommitteeDuties.js";
 import {ValidatorStore} from "../../../src/services/validatorStore.js";
@@ -29,10 +30,10 @@ describe("SyncCommitteeService", function () {
     sinon.SinonStubbedInstance<ChainHeaderTracker>;
   let pubkeys: Uint8Array[]; // Initialize pubkeys in before() so bls is already initialized
 
-  const config = createIChainForkConfig({
+  const config = createChainForkConfig({
     ...mainnetConfig,
     SECONDS_PER_SLOT: 1 / 1000, // Make slot time super short: 1 ms
-    ALTAIR_FORK_EPOCH: 0, // Activate Altair immediatelly
+    ALTAIR_FORK_EPOCH: 0, // Activate Altair immediately
   });
 
   before(() => {
@@ -77,8 +78,16 @@ describe("SyncCommitteeService", function () {
     ];
 
     // Return empty replies to duties service
-    api.beacon.getStateValidators.resolves({data: [], executionOptimistic: false});
-    api.validator.getSyncCommitteeDuties.resolves({data: [], executionOptimistic: false});
+    api.beacon.getStateValidators.resolves({
+      response: {data: [], executionOptimistic: false},
+      ok: true,
+      status: HttpStatusCode.OK,
+    });
+    api.validator.getSyncCommitteeDuties.resolves({
+      response: {data: [], executionOptimistic: false},
+      ok: true,
+      status: HttpStatusCode.OK,
+    });
 
     // Mock duties service to return some duties directly
     syncCommitteeService["dutiesService"].getDutiesAtSlot = sinon.stub().returns(duties);
@@ -87,7 +96,11 @@ describe("SyncCommitteeService", function () {
 
     chainHeaderTracker.getCurrentChainHead.returns(beaconBlockRoot);
     api.beacon.submitPoolSyncCommitteeSignatures.resolves();
-    api.validator.produceSyncCommitteeContribution.resolves({data: contribution});
+    api.validator.produceSyncCommitteeContribution.resolves({
+      response: {data: contribution},
+      ok: true,
+      status: HttpStatusCode.OK,
+    });
     api.validator.publishContributionAndProofs.resolves();
 
     // Mock signing service

@@ -1,7 +1,8 @@
-import {IChainForkConfig} from "@lodestar/config";
+import {ChainForkConfig} from "@lodestar/config";
 import {Api} from "../routes/index.js";
 import {ServerInstance, ServerRoute, RouteConfig, registerRoute} from "../../utils/server/index.js";
 
+import {ServerApi} from "../../interfaces.js";
 import * as beacon from "./beacon.js";
 import * as configApi from "./config.js";
 import * as debug from "./debug.js";
@@ -9,6 +10,7 @@ import * as events from "./events.js";
 import * as lightclient from "./lightclient.js";
 import * as lodestar from "./lodestar.js";
 import * as node from "./node.js";
+import * as proof from "./proof.js";
 import * as validator from "./validator.js";
 
 // Re-export for convenience
@@ -16,8 +18,8 @@ export {RouteConfig};
 
 export function registerRoutes(
   server: ServerInstance,
-  config: IChainForkConfig,
-  api: Api,
+  config: ChainForkConfig,
+  api: {[K in keyof Api]: ServerApi<Api[K]>},
   enabledNamespaces: (keyof Api)[]
 ): void {
   const routesByNamespace: {
@@ -36,6 +38,7 @@ export function registerRoutes(
     lightclient: () => lightclient.getRoutes(config, api.lightclient),
     lodestar: () => lodestar.getRoutes(config, api.lodestar),
     node: () => node.getRoutes(config, api.node),
+    proof: () => proof.getRoutes(config, api.proof),
     validator: () => validator.getRoutes(config, api.validator),
   };
 

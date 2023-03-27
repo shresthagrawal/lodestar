@@ -1,4 +1,4 @@
-import {routes} from "@lodestar/api";
+import {routes, ServerApi} from "@lodestar/api";
 import {
   BeaconStateAllForks,
   CachedBeaconStateAltair,
@@ -6,7 +6,7 @@ import {
   getCurrentEpoch,
 } from "@lodestar/state-transition";
 import {ApiError} from "../../errors.js";
-import {ApiModules, IS_OPTIMISTIC_TEMP} from "../../types.js";
+import {ApiModules} from "../../types.js";
 import {
   filterStateValidatorsByStatus,
   getStateValidatorIndex,
@@ -19,32 +19,34 @@ export function getBeaconStateApi({
   chain,
   config,
   db,
-}: Pick<ApiModules, "chain" | "config" | "db">): routes.beacon.state.Api {
-  async function getState(stateId: routes.beacon.StateId): Promise<BeaconStateAllForks> {
-    return await resolveStateId(config, chain, db, stateId);
+}: Pick<ApiModules, "chain" | "config" | "db">): ServerApi<routes.beacon.state.Api> {
+  async function getState(
+    stateId: routes.beacon.StateId
+  ): Promise<{state: BeaconStateAllForks; executionOptimistic: boolean}> {
+    return resolveStateId(config, chain, db, stateId);
   }
 
   return {
     async getStateRoot(stateId) {
-      const state = await getState(stateId);
+      const {state, executionOptimistic} = await getState(stateId);
       return {
-        executionOptimistic: IS_OPTIMISTIC_TEMP,
+        executionOptimistic,
         data: {root: state.hashTreeRoot()},
       };
     },
 
     async getStateFork(stateId) {
-      const state = await getState(stateId);
+      const {state, executionOptimistic} = await getState(stateId);
       return {
-        executionOptimistic: IS_OPTIMISTIC_TEMP,
+        executionOptimistic,
         data: state.fork,
       };
     },
 
     async getStateFinalityCheckpoints(stateId) {
-      const state = await getState(stateId);
+      const {state, executionOptimistic} = await getState(stateId);
       return {
-        executionOptimistic: IS_OPTIMISTIC_TEMP,
+        executionOptimistic,
         data: {
           currentJustified: state.currentJustifiedCheckpoint,
           previousJustified: state.previousJustifiedCheckpoint,
@@ -54,7 +56,7 @@ export function getBeaconStateApi({
     },
 
     async getStateValidators(stateId, filters) {
-      const state = await resolveStateId(config, chain, db, stateId);
+      const {state, executionOptimistic} = await resolveStateId(config, chain, db, stateId);
       const currentEpoch = getCurrentEpoch(state);
       const {validators, balances} = state; // Get the validators sub tree once for all the loop
       const {pubkey2index} = chain.getHeadState().epochCtx;
@@ -62,8 +64,9 @@ export function getBeaconStateApi({
       const validatorResponses: routes.beacon.ValidatorResponse[] = [];
       if (filters?.id) {
         for (const id of filters.id) {
-          const validatorIndex = getStateValidatorIndex(id, state, pubkey2index);
-          if (validatorIndex != null) {
+          const resp = getStateValidatorIndex(id, state, pubkey2index);
+          if (resp.valid) {
+            const validatorIndex = resp.validatorIndex;
             const validator = validators.getReadonly(validatorIndex);
             if (filters.status && !filters.status.includes(getValidatorStatus(validator, currentEpoch))) {
               continue;
@@ -78,13 +81,13 @@ export function getBeaconStateApi({
           }
         }
         return {
-          executionOptimistic: IS_OPTIMISTIC_TEMP,
+          executionOptimistic,
           data: validatorResponses,
         };
       } else if (filters?.status) {
         const validatorsByStatus = filterStateValidatorsByStatus(filters.status, state, pubkey2index, currentEpoch);
         return {
-          executionOptimistic: IS_OPTIMISTIC_TEMP,
+          executionOptimistic,
           data: validatorsByStatus,
         };
       }
@@ -98,22 +101,23 @@ export function getBeaconStateApi({
       }
 
       return {
-        executionOptimistic: IS_OPTIMISTIC_TEMP,
+        executionOptimistic,
         data: resp,
       };
     },
 
     async getStateValidator(stateId, validatorId) {
-      const state = await resolveStateId(config, chain, db, stateId);
+      const {state, executionOptimistic} = await resolveStateId(config, chain, db, stateId);
       const {pubkey2index} = chain.getHeadState().epochCtx;
 
-      const validatorIndex = getStateValidatorIndex(validatorId, state, pubkey2index);
-      if (validatorIndex == null) {
-        throw new ApiError(404, "Validator not found");
+      const resp = getStateValidatorIndex(validatorId, state, pubkey2index);
+      if (!resp.valid) {
+        throw new ApiError(resp.code, resp.reason);
       }
 
+      const validatorIndex = resp.validatorIndex;
       return {
-        executionOptimistic: IS_OPTIMISTIC_TEMP,
+        executionOptimistic,
         data: toValidatorResponse(
           validatorIndex,
           state.validators.getReadonly(validatorIndex),
@@ -124,7 +128,7 @@ export function getBeaconStateApi({
     },
 
     async getStateValidatorBalances(stateId, indices) {
-      const state = await resolveStateId(config, chain, db, stateId);
+      const {state, executionOptimistic} = await resolveStateId(config, chain, db, stateId);
 
       if (indices) {
         const headState = chain.getHeadState();
@@ -143,7 +147,7 @@ export function getBeaconStateApi({
           }
         }
         return {
-          executionOptimistic: IS_OPTIMISTIC_TEMP,
+          executionOptimistic,
           data: balances,
         };
       }
@@ -155,13 +159,13 @@ export function getBeaconStateApi({
         resp.push({index: i, balance: balancesArr[i]});
       }
       return {
-        executionOptimistic: IS_OPTIMISTIC_TEMP,
+        executionOptimistic,
         data: resp,
       };
     },
 
     async getEpochCommittees(stateId, filters) {
-      const state = await resolveStateId(config, chain, db, stateId);
+      const {state, executionOptimistic} = await resolveStateId(config, chain, db, stateId);
 
       const stateCached = state as CachedBeaconStateAltair;
       if (stateCached.epochCtx === undefined) {
@@ -189,7 +193,7 @@ export function getBeaconStateApi({
       });
 
       return {
-        executionOptimistic: IS_OPTIMISTIC_TEMP,
+        executionOptimistic,
         data: committesFlat,
       };
     },
@@ -200,7 +204,7 @@ export function getBeaconStateApi({
      */
     async getEpochSyncCommittees(stateId, epoch) {
       // TODO: Should pick a state with the provided epoch too
-      const state = await resolveStateId(config, chain, db, stateId);
+      const {state, executionOptimistic} = await resolveStateId(config, chain, db, stateId);
 
       // TODO: If possible compute the syncCommittees in advance of the fork and expose them here.
       // So the validators can prepare and potentially attest the first block. Not critical tho, it's very unlikely
@@ -217,7 +221,7 @@ export function getBeaconStateApi({
       const syncCommitteeCache = stateCached.epochCtx.getIndexedSyncCommitteeAtEpoch(epoch ?? stateEpoch);
 
       return {
-        executionOptimistic: IS_OPTIMISTIC_TEMP,
+        executionOptimistic,
         data: {
           validators: syncCommitteeCache.validatorIndices,
           // TODO: This is not used by the validator and will be deprecated soon

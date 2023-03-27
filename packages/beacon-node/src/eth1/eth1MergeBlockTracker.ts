@@ -1,8 +1,8 @@
-import {IChainConfig} from "@lodestar/config";
+import {ChainConfig} from "@lodestar/config";
 import {RootHex} from "@lodestar/types";
-import {ILogger, pruneSetToMax} from "@lodestar/utils";
+import {Logger, pruneSetToMax} from "@lodestar/utils";
 import {toHexString} from "@chainsafe/ssz";
-import {IMetrics} from "../metrics/index.js";
+import {Metrics} from "../metrics/index.js";
 import {ZERO_HASH_HEX} from "../constants/index.js";
 import {enumToIndexMap} from "../util/enum.js";
 import {IEth1Provider, EthJsonRpcBlockRaw, PowMergeBlock, PowMergeBlockTimestamp, TDProgress} from "./interface.js";
@@ -31,10 +31,10 @@ const MAX_CACHE_POW_BLOCKS = 1024;
 const MAX_TD_RENDER_VALUE = Number.MAX_SAFE_INTEGER;
 
 export type Eth1MergeBlockTrackerModules = {
-  config: IChainConfig;
-  logger: ILogger;
+  config: ChainConfig;
+  logger: Logger;
   signal: AbortSignal;
-  metrics: IMetrics | null;
+  metrics: Metrics | null;
 };
 
 // get_pow_block_at_total_difficulty
@@ -46,9 +46,9 @@ export type Eth1MergeBlockTrackerModules = {
  * production during the weeks between BELLATRIX_EPOCH and TTD.
  */
 export class Eth1MergeBlockTracker {
-  private readonly config: IChainConfig;
-  private readonly logger: ILogger;
-  private readonly metrics: IMetrics | null;
+  private readonly config: ChainConfig;
+  private readonly logger: Logger;
+  private readonly metrics: Metrics | null;
 
   private readonly blocksByHashCache = new Map<RootHex, PowMergeBlock>();
   private readonly intervals: NodeJS.Timeout[] = [];
@@ -173,7 +173,7 @@ export class Eth1MergeBlockTracker {
     });
 
     const interval = setInterval(() => {
-      // Pre-emptively try to find merge block and cache it if found.
+      // Preemptively try to find merge block and cache it if found.
       // Future callers of getTerminalPowBlock() will re-use the cached found mergeBlock.
       this.getTerminalPowBlockFromEth1().catch((e) => {
         this.logger.error("Error on findMergeBlock", {}, e as Error);
@@ -267,7 +267,7 @@ export class Eth1MergeBlockTracker {
       // For the search below to require more than a few hops, multiple block proposers in a row must fail to detect
       // an existing merge block. Such situation is extremely unlikely, so this search is left un-optimized. Since
       // this class can start eagerly looking for the merge block when not necessary, startPollingMergeBlock() should
-      // only be called when there is certainity that a mergeBlock search is necessary.
+      // only be called when there is certainty that a mergeBlock search is necessary.
 
       // eslint-disable-next-line no-constant-condition
       while (true) {

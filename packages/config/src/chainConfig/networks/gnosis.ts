@@ -1,17 +1,20 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 import {fromHexString as b} from "@chainsafe/ssz";
 import {PresetName} from "@lodestar/params";
-import {IChainConfig} from "../types.js";
+import {ChainConfig} from "../types.js";
 import {chainConfig as mainnet} from "../presets/mainnet.js";
 
-/* eslint-disable max-len */
-
-export const gnosisChainConfig: IChainConfig = {
+export const gnosisChainConfig: ChainConfig = {
   ...mainnet,
 
   // NOTE: Only add diff values
   PRESET_BASE: PresetName.gnosis,
   CONFIG_NAME: "gnosis",
+
+  // Transition
+  TERMINAL_TOTAL_DIFFICULTY: BigInt("8626000000000000000000058750000000000000000000"),
+  TERMINAL_BLOCK_HASH: b("0x0000000000000000000000000000000000000000000000000000000000000000"),
+  TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH: Infinity,
 
   SECONDS_PER_SLOT: 5,
   SECONDS_PER_ETH1_BLOCK: 6,
@@ -34,5 +37,5 @@ export const gnosisChainConfig: IChainConfig = {
   ALTAIR_FORK_EPOCH: 512,
   // Bellatrix
   BELLATRIX_FORK_VERSION: b("0x02000064"),
-  BELLATRIX_FORK_EPOCH: Infinity,
+  BELLATRIX_FORK_EPOCH: 385536,
 };

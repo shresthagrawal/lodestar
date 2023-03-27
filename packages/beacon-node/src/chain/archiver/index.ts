@@ -1,16 +1,16 @@
-import {ILogger} from "@lodestar/utils";
+import {Logger} from "@lodestar/utils";
 
 import {CheckpointWithHex} from "@lodestar/fork-choice";
 import {IBeaconDb} from "../../db/index.js";
 import {JobItemQueue} from "../../util/queue/index.js";
 import {IBeaconChain} from "../interface.js";
 import {ChainEvent} from "../emitter.js";
-import {StatesArchiver} from "./archiveStates.js";
+import {StatesArchiver, StatesArchiverOpts} from "./archiveStates.js";
 import {archiveBlocks} from "./archiveBlocks.js";
 
 const PROCESS_FINALIZED_CHECKPOINT_QUEUE_LEN = 256;
 
-export type ArchiverOpts = {
+export type ArchiverOpts = StatesArchiverOpts & {
   disableArchiveOnCheckpoint?: boolean;
 };
 
@@ -26,11 +26,11 @@ export class Archiver {
   constructor(
     private readonly db: IBeaconDb,
     private readonly chain: IBeaconChain,
-    private readonly logger: ILogger,
+    private readonly logger: Logger,
     signal: AbortSignal,
     opts: ArchiverOpts
   ) {
-    this.statesArchiver = new StatesArchiver(chain.checkpointStateCache, db, logger);
+    this.statesArchiver = new StatesArchiver(chain.checkpointStateCache, db, logger, opts);
     this.jobQueue = new JobItemQueue<[CheckpointWithHex], void>(this.processFinalizedCheckpoint, {
       maxLength: PROCESS_FINALIZED_CHECKPOINT_QUEUE_LEN,
       signal,
@@ -72,8 +72,16 @@ export class Archiver {
   private processFinalizedCheckpoint = async (finalized: CheckpointWithHex): Promise<void> => {
     try {
       const finalizedEpoch = finalized.epoch;
-      this.logger.verbose("Start processing finalized checkpoint", {epoch: finalizedEpoch});
-      await archiveBlocks(this.db, this.chain.forkChoice, this.chain.lightClientServer, this.logger, finalized);
+      this.logger.verbose("Start processing finalized checkpoint", {epoch: finalizedEpoch, rootHex: finalized.rootHex});
+      await archiveBlocks(
+        this.chain.config,
+        this.db,
+        this.chain.forkChoice,
+        this.chain.lightClientServer,
+        this.logger,
+        finalized,
+        this.chain.clock.currentEpoch
+      );
 
       // should be after ArchiveBlocksTask to handle restart cleanly
       await this.statesArchiver.maybeArchiveState(finalized);
@@ -84,7 +92,10 @@ export class Archiver {
       this.chain.forkChoice.prune(finalized.rootHex);
       await this.updateBackfillRange(finalized);
 
-      this.logger.verbose("Finish processing finalized checkpoint", {epoch: finalizedEpoch});
+      this.logger.verbose("Finish processing finalized checkpoint", {
+        epoch: finalizedEpoch,
+        rootHex: finalized.rootHex,
+      });
     } catch (e) {
       this.logger.error("Error processing finalized checkpoint", {epoch: finalized.epoch}, e as Error);
     }

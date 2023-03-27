@@ -1,18 +1,17 @@
 import {peerIdFromString} from "@libp2p/peer-id";
 import {multiaddr} from "@multiformats/multiaddr";
-import {routes} from "@lodestar/api";
+import {routes, ServerApi} from "@lodestar/api";
 import {Bucket, Repository} from "@lodestar/db";
 import {toHex} from "@lodestar/utils";
 import {getLatestWeakSubjectivityCheckpointEpoch} from "@lodestar/state-transition";
 import {toHexString} from "@chainsafe/ssz";
-import {IChainForkConfig} from "@lodestar/config";
+import {ChainForkConfig} from "@lodestar/config";
 import {ssz} from "@lodestar/types";
 import {BeaconChain} from "../../../chain/index.js";
 import {QueuedStateRegenerator, RegenRequest} from "../../../chain/regen/index.js";
 import {GossipType} from "../../../network/index.js";
 import {IBeaconDb} from "../../../db/interface.js";
 import {ApiModules} from "../types.js";
-import {formatNodePeer} from "../node/utils.js";
 
 export function getLodestarApi({
   chain,
@@ -20,7 +19,7 @@ export function getLodestarApi({
   db,
   network,
   sync,
-}: Pick<ApiModules, "chain" | "config" | "db" | "network" | "sync">): routes.lodestar.Api {
+}: Pick<ApiModules, "chain" | "config" | "db" | "network" | "sync">): ServerApi<routes.lodestar.Api> {
   let writingHeapdump = false;
 
   return {
@@ -59,57 +58,54 @@ export function getLodestarApi({
       return {data: sync.getSyncChainsDebugState()};
     },
 
-    async getGossipQueueItems(gossipType: GossipType) {
-      const jobQueue = network.gossip.jobQueues[gossipType];
-      if (jobQueue === undefined) {
-        throw Error(`Unknown gossipType ${gossipType}, known values: ${Object.keys(jobQueue).join(", ")}`);
-      }
-
-      return jobQueue.getItems().map((item) => {
-        const [topic, message, propagationSource, seenTimestampSec] = item.args;
-        return {
-          topic: topic,
-          propagationSource,
-          data: message.data,
-          addedTimeMs: item.addedTimeMs,
-          seenTimestampSec,
-        };
-      });
+    async getGossipQueueItems(gossipType: GossipType | string) {
+      return {
+        data: await network.dumpGossipQueueItems(gossipType),
+      };
     },
 
     async getRegenQueueItems() {
-      return (chain.regen as QueuedStateRegenerator).jobQueue.getItems().map((item) => ({
-        key: item.args[0].key,
-        args: regenRequestToJson(config, item.args[0]),
-        addedTimeMs: item.addedTimeMs,
-      }));
+      return {
+        data: (chain.regen as QueuedStateRegenerator).jobQueue.getItems().map((item) => ({
+          key: item.args[0].key,
+          args: regenRequestToJson(config, item.args[0]),
+          addedTimeMs: item.addedTimeMs,
+        })),
+      };
     },
 
     async getBlockProcessorQueueItems() {
-      return (chain as BeaconChain)["blockProcessor"].jobQueue.getItems().map((item) => {
-        const [blocks, opts] = item.args;
-        return {
-          blockSlots: blocks.map((block) => block.message.slot),
-          jobOpts: opts,
-          addedTimeMs: item.addedTimeMs,
-        };
-      });
+      return {
+        data: (chain as BeaconChain)["blockProcessor"].jobQueue.getItems().map((item) => {
+          const [blockInputs, opts] = item.args;
+          return {
+            blockSlots: blockInputs.map((blockInput) => blockInput.block.message.slot),
+            jobOpts: opts,
+            addedTimeMs: item.addedTimeMs,
+          };
+        }),
+      };
     },
 
     async getStateCacheItems() {
-      return (chain as BeaconChain)["stateCache"].dumpSummary();
+      return {data: (chain as BeaconChain)["stateCache"].dumpSummary()};
     },
 
     async getCheckpointStateCacheItems() {
-      return (chain as BeaconChain)["checkpointStateCache"].dumpSummary();
+      return {data: (chain as BeaconChain)["checkpointStateCache"].dumpSummary()};
     },
 
     async getGossipPeerScoreStats() {
-      return network.gossip.dumpPeerScoreStats();
+      return {
+        data: Object.entries(await network.dumpGossipPeerScoreStats()).map(([peerId, stats]) => ({peerId, ...stats})),
+      };
+    },
+
+    async getLodestarPeerScoreStats() {
+      return {data: await network.dumpPeerScoreStats()};
     },
 
     async runGC() {
-      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (!global.gc) throw Error("You must expose GC running the Node.js process with 'node --expose_gc'");
       global.gc();
     },
@@ -132,16 +128,11 @@ export function getLodestarApi({
 
     async getPeers(filters) {
       const {state, direction} = filters || {};
-      const peers = Array.from(network.getConnectionsByPeer().entries())
-        .map(([peerIdStr, connections]) => ({
-          ...formatNodePeer(peerIdStr, connections),
-          agentVersion: network.getAgentVersion(peerIdStr),
-        }))
-        .filter(
-          (nodePeer) =>
-            (!state || state.length === 0 || state.includes(nodePeer.state)) &&
-            (!direction || direction.length === 0 || (nodePeer.direction && direction.includes(nodePeer.direction)))
-        );
+      const peers = (await network.dumpPeers()).filter(
+        (nodePeer) =>
+          (!state || state.length === 0 || state.includes(nodePeer.state)) &&
+          (!direction || direction.length === 0 || (nodePeer.direction && direction.includes(nodePeer.direction)))
+      );
 
       return {
         data: peers,
@@ -151,7 +142,7 @@ export function getLodestarApi({
 
     async discv5GetKadValues() {
       return {
-        data: network.discv5?.kadValues().map((enr) => enr.encodeTxt()) ?? [],
+        data: await network.dumpDiscv5KadValues(),
       };
     },
 
@@ -160,7 +151,7 @@ export function getLodestarApi({
         if (repo instanceof Repository) {
           const bucket = (repo as RepositoryAny)["bucket"];
           if (bucket === bucket || Bucket[bucket] === bucketReq) {
-            return stringifyKeys(await repo.keys());
+            return {data: stringifyKeys(await repo.keys())};
           }
         }
       }
@@ -169,12 +160,12 @@ export function getLodestarApi({
     },
 
     async dumpDbStateIndex() {
-      return db.stateArchive.dumpRootIndexEntries();
+      return {data: await db.stateArchive.dumpRootIndexEntries()};
     },
   };
 }
 
-function regenRequestToJson(config: IChainForkConfig, regenRequest: RegenRequest): unknown {
+function regenRequestToJson(config: ChainForkConfig, regenRequest: RegenRequest): unknown {
   switch (regenRequest.key) {
     case "getBlockSlotState":
       return {

@@ -9,7 +9,7 @@ import {
 import {phase0, ssz} from "@lodestar/types";
 import {config} from "@lodestar/config/default";
 
-import {createIBeaconConfig, IChainForkConfig} from "@lodestar/config";
+import {createBeaconConfig, ChainForkConfig} from "@lodestar/config";
 import {ZERO_HASH} from "../../src/constants/index.js";
 import {newZeroedBigIntArray} from "../../src/util/index.js";
 
@@ -22,7 +22,6 @@ import {
 } from "../../src/index.js";
 import {BeaconStateCache} from "../../src/cache/stateCache.js";
 import {EpochContextOpts} from "../../src/cache/epochContext.js";
-import {generateEmptyBlock} from "./block.js";
 
 /**
  * Copy of BeaconState, but all fields are marked optional to allow for swapping out variables as needed.
@@ -50,7 +49,7 @@ export function generateState(opts?: TestBeaconState): BeaconStatePhase0 {
       proposerIndex: 0,
       parentRoot: Buffer.alloc(32),
       stateRoot: Buffer.alloc(32),
-      bodyRoot: ssz.phase0.BeaconBlockBody.hashTreeRoot(generateEmptyBlock().body),
+      bodyRoot: ssz.phase0.BeaconBlockBody.hashTreeRoot(ssz.phase0.BeaconBlockBody.defaultValue()),
     },
     blockRoots: Array.from({length: SLOTS_PER_HISTORICAL_ROOT}, () => ZERO_HASH),
     stateRoots: Array.from({length: SLOTS_PER_HISTORICAL_ROOT}, () => ZERO_HASH),
@@ -86,12 +85,12 @@ export function generateState(opts?: TestBeaconState): BeaconStatePhase0 {
 }
 
 export function generateCachedState(
-  config: IChainForkConfig = minimalConfig,
+  config: ChainForkConfig = minimalConfig,
   opts: TestBeaconState = {}
 ): CachedBeaconStateAllForks {
   const state = generateState(opts);
   return createCachedBeaconState(state, {
-    config: createIBeaconConfig(config, state.genesisValidatorsRoot),
+    config: createBeaconConfig(config, state.genesisValidatorsRoot),
     // This is a test state, there's no need to have a global shared cache of keys
     pubkey2index: new PubkeyIndexMap(),
     index2pubkey: [],
@@ -100,13 +99,13 @@ export function generateCachedState(
 
 export function createCachedBeaconStateTest<T extends BeaconStateAllForks>(
   state: T,
-  configCustom: IChainForkConfig = config,
+  configCustom: ChainForkConfig = config,
   opts?: EpochContextOpts
 ): T & BeaconStateCache {
   return createCachedBeaconState<T>(
     state,
     {
-      config: createIBeaconConfig(configCustom, state.genesisValidatorsRoot),
+      config: createBeaconConfig(configCustom, state.genesisValidatorsRoot),
       // This is a test state, there's no need to have a global shared cache of keys
       pubkey2index: new PubkeyIndexMap(),
       index2pubkey: [],

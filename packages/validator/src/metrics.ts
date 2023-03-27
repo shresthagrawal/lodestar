@@ -3,6 +3,14 @@ export enum MessageSource {
   publish = "publish",
 }
 
+export enum BeaconHealth {
+  READY = 0,
+  SYNCING = 1,
+  NOT_INITIALIZED_OR_ISSUES = 2,
+  UNKNOWN = 3,
+  ERROR = 4,
+}
+
 type LabelsGeneric = Record<string, string | undefined>;
 type CollectFn<Labels extends LabelsGeneric> = (metric: Gauge<Labels>) => void;
 
@@ -75,7 +83,7 @@ export type LodestarGitData = {
 /**
  * A collection of metrics used throughout the Gossipsub behaviour.
  */
-// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/explicit-function-return-type
+// eslint-disable-next-line @typescript-eslint/explicit-function-return-type
 export function getMetrics(register: MetricsRegister, gitData: LodestarGitData) {
   // Using function style instead of class to prevent having to re-declare all MetricsPrometheus types.
 
@@ -312,13 +320,26 @@ export function getMetrics(register: MetricsRegister, gitData: LodestarGitData) 
 
     // REST API client
 
+    beaconHealth: register.gauge({
+      name: "vc_beacon_health",
+      help: `Current health status of the beacon(s) the validator is connected too. ${renderEnumNumeric(BeaconHealth)}`,
+    }),
+
     restApiClient: {
       requestTime: register.histogram<{routeId: string}>({
         name: "vc_rest_api_client_request_time_seconds",
         help: "Histogram of REST API client request time by routeId",
         labelNames: ["routeId"],
         // Expected times are ~ 50-500ms, but in an overload NodeJS they can be greater
-        buckets: [0.01, 0.1, 1, 5],
+        buckets: [0.01, 0.1, 1, 2, 5],
+      }),
+
+      streamTime: register.histogram<{routeId: string}>({
+        name: "vc_rest_api_client_stream_time_seconds",
+        help: "Histogram of REST API client streaming time by routeId",
+        labelNames: ["routeId"],
+        // Expected times are ~ 50-500ms, but in an overload NodeJS they can be greater
+        buckets: [0.01, 0.1, 1, 2, 5],
       }),
 
       requestErrors: register.gauge<{routeId: string}>({
@@ -343,7 +364,7 @@ export function getMetrics(register: MetricsRegister, gitData: LodestarGitData) 
     keymanagerApiRest: {
       responseTime: register.histogram<{operationId: string}>({
         name: "vc_keymanager_api_rest_response_time_seconds",
-        help: "REST API time to fullfill a request by operationId",
+        help: "REST API time to fulfill a request by operationId",
         labelNames: ["operationId"],
         // Request times range between 1ms to 100ms in normal conditions. Can get to 1-5 seconds if overloaded
         buckets: [0.01, 0.1, 1],
@@ -394,6 +415,15 @@ export function getMetrics(register: MetricsRegister, gitData: LodestarGitData) 
         help: "Total count of db write items",
         labelNames: ["bucket"],
       }),
+      dbSizeTotal: register.gauge({
+        name: "validator_db_size_bytes_total",
+        help: "Approximate number of bytes of file system space used by db",
+      }),
+      dbApproximateSizeTime: register.histogram({
+        name: "validator_db_approximate_size_time_seconds",
+        help: "Time to approximate db size in seconds",
+        buckets: [0.0001, 0.001, 0.01, 0.1, 1],
+      }),
     },
 
     doppelganger: {
@@ -408,4 +438,16 @@ export function getMetrics(register: MetricsRegister, gitData: LodestarGitData) 
       }),
     },
   };
+}
+
+export function renderEnumNumeric(obj: Record<string, unknown>): string {
+  const out: string[] = [];
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === "number") {
+      out.push(`${key}=${value}`);
+    }
+  }
+
+  return out.join(", ");
 }

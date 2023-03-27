@@ -9,6 +9,7 @@ coverage/**
 beaconchain
 lodestar-config.toml
 keys/
+keystores/
 test-db
 yarn-error.log
 package-lock.json
@@ -50,6 +51,10 @@ docs/reference/cli.md
 *.ssz
 .pyrmont
 .tmpdb
+docker/grafana_dev/dashboards
+# EIP-4844 (only commit .ssz file)
+packages/beacon-node/trusted_setup.json
+packages/beacon-node/trusted_setup.txt
 
 # Wallet CLI artifacts
 .pass

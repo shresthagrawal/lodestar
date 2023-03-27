@@ -1,9 +1,9 @@
 import {Epoch, bellatrix} from "@lodestar/types";
-import {Api, routes} from "@lodestar/api";
-import {IBeaconConfig} from "@lodestar/config";
+import {Api, ApiError, routes} from "@lodestar/api";
+import {BeaconConfig} from "@lodestar/config";
 import {SLOTS_PER_EPOCH} from "@lodestar/params";
 
-import {IClock, ILoggerVc, batchItems} from "../util/index.js";
+import {IClock, LoggerVc, batchItems} from "../util/index.js";
 import {Metrics} from "../metrics.js";
 import {ValidatorStore} from "./validatorStore.js";
 
@@ -13,12 +13,12 @@ const REGISTRATION_CHUNK_SIZE = 512;
  * proposer data (currently `feeRecipient`) so that it can issue advance fcUs to
  * the engine for building execution payload with transactions.
  *
- * This needs to be done every epoch because the BN will cache it atmost for
+ * This needs to be done every epoch because the BN will cache it at most for
  * two epochs.
  */
 export function pollPrepareBeaconProposer(
-  config: IBeaconConfig,
-  logger: ILoggerVc,
+  config: BeaconConfig,
+  logger: LoggerVc,
   api: Api,
   clock: IClock,
   validatorStore: ValidatorStore,
@@ -44,7 +44,7 @@ export function pollPrepareBeaconProposer(
             feeRecipient: validatorStore.getFeeRecipientByIndex(index),
           })
         );
-        await api.validator.prepareBeaconProposer(proposers);
+        ApiError.assert(await api.validator.prepareBeaconProposer(proposers));
       } catch (e) {
         logger.error("Failed to register proposers with beacon", {epoch}, e as Error);
       }
@@ -62,12 +62,12 @@ export function pollPrepareBeaconProposer(
  * This service is responsible for registering validators with the mev builder as they
  * might prepare and keep ready the execution payloads of just registered validators.
  *
- * This needs to be done every epoch because the builder(s) will cache it atmost for
+ * This needs to be done every epoch because the builder(s) will cache it at most for
  * two epochs.
  */
 export function pollBuilderValidatorRegistration(
-  config: IBeaconConfig,
-  logger: ILoggerVc,
+  config: BeaconConfig,
+  logger: LoggerVc,
   api: Api,
   clock: IClock,
   validatorStore: ValidatorStore,
@@ -107,7 +107,7 @@ export function pollBuilderValidatorRegistration(
               }
             )
           );
-          await api.validator.registerValidator(registrations);
+          ApiError.assert(await api.validator.registerValidator(registrations));
         } catch (e) {
           logger.error("Failed to register validator registrations with builder", {epoch}, e as Error);
         }
